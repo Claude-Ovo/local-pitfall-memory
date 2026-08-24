@@ -1,0 +1,8 @@
+﻿Yes — the local pitfall memory has an **exact match** for this error, previously seen and **verified on this machine** (confidence: 可引用):
+
+- **Root cause:** `package.json` lacks `"type": "module"` while the code uses ESM, so `bootstrap.js` can't `require()` the ESM bundle
+- **Fix command:** `npm pkg set type=module`
+- **Verified by:** `node index.js` exits 0
+- **History:** seen 1 time before, last seen in this machine's records
+
+Want me to apply it in `D:\work\sensei-clone` and re-run `node index.js` to verify?

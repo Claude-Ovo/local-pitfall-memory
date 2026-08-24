@@ -1,0 +1,13 @@
+﻿Skill **local-pitfall-memory** activated.
+Local pitfall database health report:
+
+- **Status**: healthy (`ok: true`)
+- **DB path**: `C:\Users\miku\.pitfall-memory\pitfalls.db`
+- **Version**: `0.1.0`
+- **Pitfalls recorded**: 2
+- **Total occurrences**: 2
+- **Resolutions**: 2 (both verified)
+- **Full-text search (FTS5)**: enabled
+- **Local model ready**: no — the embedding model hasn't been downloaded yet. The first `lookup` call will trigger the download; if it times out, run `scripts\run.ps1 --continue` to resume.
+
+Summary: the database itself is intact with 2 verified fixes. The only gap is the local semantic model, which will be fetched on first use.
