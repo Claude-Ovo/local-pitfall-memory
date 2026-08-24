@@ -1,0 +1,18 @@
+{
+    "venv_name": "local-pitfall-memory",
+    "python_version": "3.11",
+    "mem_need_gb": 4.0,
+    "server_alive_timeout": 300,
+    "models": [
+        {
+            "model_id": "OpenVINO/Qwen3-4B-int4-ov",
+            "dir_name": "Qwen3-4B-int4-ov",
+            "required_files": [
+                "config.json",
+                "openvino_model.bin",
+                "openvino_model.xml",
+                "openvino_tokenizer.bin"
+            ]
+        }
+    ]
+}

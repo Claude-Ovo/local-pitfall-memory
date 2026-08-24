@@ -1,0 +1,5 @@
+# local inference (day-2: attribution extractor)
+openvino-genai>=2026.0
+# model download with resume (ModelScope hub)
+modelscope>=1.20
+# no other runtime deps: storage/retrieval use stdlib sqlite3 (FTS5)

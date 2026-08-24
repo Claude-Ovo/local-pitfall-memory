@@ -1,0 +1,12 @@
+{
+    "display_name": "Local Pitfall Memory 本地踩坑记忆库",
+    "version": "0.1.0",
+    "author": "ovo-hue",
+    "description": "报错先查本机已验证的历史修复，修完自动沉淀；历史库与检索不出机。A local, verified-fix-only error memory for productivity agents.",
+    "use_cases": [
+        "终端/构建/运行时报错的本机历史命中",
+        "验证通过的修复沉淀（propose→verify→commit）",
+        "踩坑知识库一键汇编成 Markdown 文档"
+    ],
+    "tags": ["AI PC", "OpenVINO", "developer-tools", "error-memory", "offline"]
+}
