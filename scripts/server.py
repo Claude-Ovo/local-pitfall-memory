@@ -1,31 +1,30 @@
-"""server.py — long-lived attribution engine (Qwen3-4B INT4 @ OpenVINO).
+"""server.py — long-lived attribution + embedding engine (Qwen3-4B INT4 / bge-base @ OpenVINO CPU).
 
 Named-pipe protocol per local-ai-skill-authoring/references/architecture.md:
-  status   -> {"ok":true,"state":...,"pid":...,"uptime_s":...}
-  request  -> {"op":"request","kind":"attribute","error_text":...,"context":{...}}
-              {"ok":true,"result":{"error_class","package","root_cause_guess","fix_hint"},"latency_s":..}
+  status   -> {"ok":true,"state":...,"pid":...,"uptime_s":...,"version":...,"script_hash":...,"fake":...,"error":<short, redacted>}
+  request  -> kind=attribute {"error_text","context"} → {"ok":true,"result":{...},"latency_s"}
+              kind=embed     {"text"}                 → {"ok":true,"result":[...],"latency_s"}
   shutdown -> {"ok":true,"state":"shutting_down"}
-
-Design rule (MODELSCOPE-SKILL-PLAN.md §6): the model is NEVER on the lookup hot path.
-It is only consulted for first-record structuring and fuzzy queries, by the client, with a timeout.
-
-Standalone lifecycle (no server-dog): client spawns this process; it exits by itself after
-`server_alive_timeout` seconds idle (info.json, default 300, -1 = never).
-Env PITFALL_FAKE_MODEL=1 -> deterministic stub instead of OpenVINO (tests / CI).
+Full tracebacks go to ~/.pitfall-memory/server.log only; the protocol carries a short redacted summary (codex #2 P0).
+Model dirs / required files come from info.json (single config source). Env PITFALL_FAKE_MODEL=1 → deterministic stubs.
 """
 import json, os, sys, threading, time, traceback
 from multiprocessing.connection import Listener
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from redact import redact  # noqa: E402
+
 SKILL_NAME = "local-pitfall-memory"
 PIPE_ADDRESS = rf"\\.\pipe\{SKILL_NAME}"
 AUTHKEY = SKILL_NAME.encode("utf-8")
 ROOT = Path(__file__).resolve().parent.parent
-MODEL_DIR = Path.home() / ".openvino" / "models" / "Qwen3-4B-int4-ov"
-EMBED_DIR = Path.home() / ".openvino" / "models" / "bge-base-en-v1.5-int8-ov"
-EMBED_DIM = 768
+INFO = json.loads((ROOT / "info.json").read_text(encoding="utf-8"))
+MODELS_DIR = Path.home() / ".openvino" / "models"
 LOG = Path.home() / ".pitfall-memory" / "server.log"
 FAKE = os.environ.get("PITFALL_FAKE_MODEL") == "1"
+VERSION = "0.6.0"
+FAKE_DIM = 768
 
 for s in (sys.stdout, sys.stderr):
     if hasattr(s, "reconfigure"):
@@ -39,12 +38,26 @@ def log(msg):
     except Exception:
         pass
 
+def _spec(role):
+    return next((m for m in INFO["models"] if m.get("role") == role), None)
+
+def _model_dir(m):
+    return MODELS_DIR / m["dir_name"]
+
+def _complete(m):
+    d = _model_dir(m)
+    return d.exists() and all((d / f).exists() and (d / f).stat().st_size > 0 for f in m["required_files"])
+
+def _script_hash():
+    import hashlib
+    h = hashlib.sha256()
+    for name in ("server.py", "engine.py"):
+        h.update((Path(__file__).resolve().parent / name).read_bytes())
+    return h.hexdigest()[:12]
+
 def _idle_timeout():
-    try:
-        v = json.loads((ROOT / "info.json").read_text(encoding="utf-8")).get("server_alive_timeout", 300)
-        return None if v == -1 else float(v)
-    except Exception:
-        return 300.0
+    v = INFO.get("server_alive_timeout", 300)
+    return None if v == -1 else float(v)
 
 PROMPT = (
     "You are an error triage engine for developer tools. Given a terminal/build/runtime error, "
@@ -57,7 +70,7 @@ class Server:
     def __init__(self):
         self.state = "starting"; self.error = ""; self.started_at = time.time()
         self.last_used = time.time(); self.pipe = None; self.cfg = None
-        self.embedder = None; self.embed_error = ""
+        self.embedder = None; self.embed_error = ""; self.embed_dim = None
         self.lock = threading.Lock()
 
     def init_async(self):
@@ -66,35 +79,37 @@ class Server:
     def _init(self):
         try:
             if FAKE:
-                self.state = "running"; log("fake model ready"); return
+                self.embed_dim = FAKE_DIM; self.state = "running"; log("fake model ready"); return
             self.state = "loading"
-            need = ["openvino_model.bin", "openvino_model.xml", "openvino_tokenizer.bin"]
-            if not all((MODEL_DIR / f).exists() for f in need):
-                raise FileNotFoundError(f"model missing under {MODEL_DIR}; run scripts/download_model.py")
+            main = _spec("attribution")
+            if main is None or not _complete(main):
+                raise FileNotFoundError("attribution model incomplete; run scripts\\run.ps1 --continue")
             import openvino_genai as ov_genai
             t = time.perf_counter()
-            self.pipe = ov_genai.LLMPipeline(str(MODEL_DIR), "CPU")
+            self.pipe = ov_genai.LLMPipeline(str(_model_dir(main)), "CPU")
             cfg = ov_genai.GenerationConfig(); cfg.max_new_tokens = 128; cfg.do_sample = False
             self.cfg = cfg
             self.state = "running"
             log(f"model loaded in {time.perf_counter()-t:.1f}s")
-            # embedding channel is optional: failure here never blocks the attribution engine
+            emb = _spec("embedding")
             try:
-                if (EMBED_DIR / "openvino_model.xml").exists():
+                if emb and _complete(emb):
                     t = time.perf_counter()
                     ecfg = ov_genai.TextEmbeddingPipeline.Config()
                     ecfg.normalize = True; ecfg.max_length = 512
                     ecfg.pooling_type = ov_genai.TextEmbeddingPipeline.PoolingType.CLS
-                    self.embedder = ov_genai.TextEmbeddingPipeline(str(EMBED_DIR), "CPU", ecfg)
-                    log(f"embedder loaded in {time.perf_counter()-t:.1f}s")
+                    self.embedder = ov_genai.TextEmbeddingPipeline(str(_model_dir(emb)), "CPU", ecfg)
+                    self.embed_dim = len(self.embedder.embed_query("probe"))
+                    log(f"embedder loaded in {time.perf_counter()-t:.1f}s dim={self.embed_dim}")
                 else:
-                    self.embed_error = f"embedding model missing under {EMBED_DIR}"
+                    self.embed_error = "embedding model not available (optional)"
             except Exception:
-                self.embed_error = traceback.format_exc(); log(self.embed_error)
-        except Exception:
-            self.error = traceback.format_exc(); self.state = "error"; log(self.error)
+                log(traceback.format_exc()); self.embed_error = "embedder failed to load (see server.log)"
+        except Exception as exc:
+            log(traceback.format_exc())
+            self.error = redact(str(exc).splitlines()[0][:200]) if str(exc) else exc.__class__.__name__
+            self.state = "error"
 
-    # ---- inference ---------------------------------------------------------
     def attribute(self, error_text: str, context: dict) -> dict:
         text = (error_text or "")[:4000]
         if FAKE:
@@ -109,16 +124,12 @@ class Server:
         return _first_json(raw)
 
     def embed(self, text: str):
-        """L2-normalized embedding of `text`, or None when the channel is unavailable."""
         text = (text or "")[:2000]
         if FAKE:
-            # deterministic pseudo-embedding: hashed character trigrams → unit vector (tests only)
             import hashlib, math
-            vec = [0.0] * EMBED_DIM
-            toks = text.lower().split()
-            for tok in toks:
-                h = int(hashlib.md5(tok.encode()).hexdigest(), 16)
-                vec[h % EMBED_DIM] += 1.0
+            vec = [0.0] * FAKE_DIM
+            for tok in text.lower().split():
+                vec[int(hashlib.md5(tok.encode()).hexdigest(), 16) % FAKE_DIM] += 1.0
             n = math.sqrt(sum(v * v for v in vec)) or 1.0
             return [v / n for v in vec]
         if self.embedder is None:
@@ -126,32 +137,30 @@ class Server:
         with self.lock:
             return [float(x) for x in self.embedder.embed_query(text)]
 
-    # ---- protocol ----------------------------------------------------------
     def handle(self, msg: dict) -> dict:
         op = msg.get("op"); self.last_used = time.time()
         if op == "status":
-            return {"ok": True, "state": self.state, "pid": os.getpid(),
-                    "uptime_s": round(time.time() - self.started_at, 1), "error": self.error, "fake": FAKE,
-                    "embedder": bool(self.embedder) or FAKE, "embed_error": self.embed_error[:200]}
+            return {"ok": True, "state": self.state, "pid": os.getpid(), "uptime_s": round(time.time() - self.started_at, 1),
+                    "version": VERSION, "script_hash": _script_hash(), "fake": FAKE,
+                    "embedder": bool(self.embedder) or FAKE, "embed_dim": self.embed_dim,
+                    "embed_error": self.embed_error, "error": self.error}
         if op == "request":
             if self.state != "running":
                 return {"ok": False, "error": f"not ready: {self.state}", "state": self.state}
-            if msg.get("kind") == "embed":
-                try:
-                    t = time.perf_counter(); vec = self.embed(msg.get("text", ""))
+            kind = msg.get("kind")
+            try:
+                t = time.perf_counter()
+                if kind == "embed":
+                    vec = self.embed(msg.get("text", ""))
                     if vec is None:
                         return {"ok": False, "error": "embedding channel unavailable"}
                     return {"ok": True, "result": vec, "latency_s": round(time.perf_counter() - t, 3)}
-                except Exception as exc:
-                    log(traceback.format_exc()); return {"ok": False, "error": str(exc)}
-            if msg.get("kind") != "attribute":
-                return {"ok": False, "error": f"unknown kind: {msg.get('kind')}"}
-            try:
-                t = time.perf_counter()
-                res = self.attribute(msg.get("error_text", ""), msg.get("context") or {})
-                return {"ok": True, "result": res, "latency_s": round(time.perf_counter() - t, 2)}
+                if kind == "attribute":
+                    res = self.attribute(msg.get("error_text", ""), msg.get("context") or {})
+                    return {"ok": True, "result": res, "latency_s": round(time.perf_counter() - t, 2)}
+                return {"ok": False, "error": f"unknown kind: {kind}"}
             except Exception as exc:
-                log(traceback.format_exc()); return {"ok": False, "error": str(exc)}
+                log(traceback.format_exc()); return {"ok": False, "error": redact(exc.__class__.__name__ + ": " + str(exc)[:120])}
         if op == "shutdown":
             return {"ok": True, "state": "shutting_down"}
         return {"ok": False, "error": f"unknown op: {op}"}
@@ -171,9 +180,12 @@ def _first_json(raw: str) -> dict:
 def main() -> int:
     srv = Server(); srv.init_async()
     idle = _idle_timeout()
-    log(f"listening on {PIPE_ADDRESS} idle_timeout={idle} fake={FAKE}")
-    with Listener(PIPE_ADDRESS, authkey=AUTHKEY) as listener:
-        # watchdog: exit when idle too long (standalone replacement for server-dog keepalive)
+    try:
+        listener = Listener(PIPE_ADDRESS, authkey=AUTHKEY)
+    except Exception as exc:
+        log(f"pipe busy/unavailable: {exc}"); return 2        # another server owns the pipe: exit quietly
+    log(f"listening on {PIPE_ADDRESS} idle_timeout={idle} fake={FAKE} v{VERSION}")
+    with listener:
         def watchdog():
             while True:
                 time.sleep(5)

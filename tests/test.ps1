@@ -18,6 +18,9 @@ if ($LASTEXITCODE -ne 0) { Write-Output 'REVIEW1 FAIL'; exit 1 }
 Write-Output '== hybrid retrieval tests (fake embedder)'
 python (Join-Path $PSScriptRoot 'test_retrieval.py')
 if ($LASTEXITCODE -ne 0) { Write-Output 'RETRIEVAL FAIL'; exit 1 }
+Write-Output '== codex review #2 regression tests'
+python (Join-Path $PSScriptRoot 'test_review2.py')
+if ($LASTEXITCODE -ne 0) { Write-Output 'REVIEW2 FAIL'; exit 1 }
 Write-Output '== e2e through run.ps1'
 python (Join-Path $PSScriptRoot 'make_fixtures.py') $PSScriptRoot | Out-Null
 

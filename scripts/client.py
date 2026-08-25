@@ -3,12 +3,13 @@
 Commands: status | lookup | propose | commit | digest | server
 Storage: SQLite (FTS5) at %USERPROFILE%/.pitfall-memory/pitfalls.db (override: PITFALL_DB).
 
-Data discipline (codex review #1, P0):
-  * error text is REDACTED FIRST, then normalized/fingerprinted/stored — no raw text reaches any table
-  * every string returned to the Host passes redact() again (belt and braces)
-  * exit codes: 0 ok · 1 error (structured JSON on stdout) · 3 model download pending (--continue)
-Model policy (MODELSCOPE-SKILL-PLAN.md §6): NEVER on the lookup hot path — only first-record propose
-and `lookup --attribute` on fuzzy results, always soft-fail.
+Data discipline (codex reviews #1/#2):
+  * everything from the request (error_text, context.runtime, cwd, resolution fields) is REDACTED FIRST,
+    then normalized/fingerprinted/stored — no raw text reaches any table
+  * every value returned to the Host passes redact() again, recursively (server replies included)
+  * exit codes: 0 ok · 1 error (structured JSON on stdout) · 3 required model download pending (--continue)
+Model policy (MODELSCOPE-SKILL-PLAN.md §6): NEVER on the exact/family lookup path — only first-record propose,
+`lookup --attribute` on fuzzy results, and the optional embedding channel; always soft-fail.
 """
 import argparse, hashlib, io, json, os, re, sqlite3, subprocess, sys, time
 from pathlib import Path
@@ -20,13 +21,18 @@ import engine  # noqa: E402
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 ROOT = Path(__file__).resolve().parent.parent
 INFO = json.loads((ROOT / "info.json").read_text(encoding="utf-8"))
 MODELS_DIR = Path.home() / ".openvino" / "models"
 DB_PATH = Path(os.environ.get("PITFALL_DB", Path.home() / ".pitfall-memory" / "pitfalls.db"))
 MODEL_TIMEOUT_S = float(os.environ.get("PITFALL_MODEL_TIMEOUT", "45"))
+FAKE = os.environ.get("PITFALL_FAKE_MODEL") == "1"
 MAX_ERROR_CHARS = 64_000
+MAX_FIELD_CHARS = 2_000
+RRF_K = 60                      # reciprocal-rank-fusion constant
+SEMANTIC_MAX_RANK = 5           # a candidate counts if it is within the top-N of at least one channel
+BACKFILL_PER_LOOKUP = 20        # lazy embedding backfill budget per semantic lookup (~0.1 s each)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS pitfalls(
@@ -51,33 +57,40 @@ CREATE VIRTUAL TABLE IF NOT EXISTS pitfall_fts USING fts5(
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS embeddings(pitfall_id INTEGER PRIMARY KEY REFERENCES pitfalls(id), dim INTEGER, vec BLOB);
 """
-RRF_K = 60            # standard reciprocal-rank-fusion constant
-SEMANTIC_MIN = 0.02   # fused score floor (≈ rank ≤ 3 in at least one channel); below → "none"
 
 class UserError(Exception):
-    """Structured, redacted error returned to the Host with exit code 1."""
     def __init__(self, code, msg, exit_code=1):
         super().__init__(msg); self.code = code; self.exit_code = exit_code
 
+def deep_redact(obj):
+    """Recursively redact every string in a reply before it reaches the Host."""
+    if isinstance(obj, str):
+        return redact(obj)
+    if isinstance(obj, dict):
+        return {k: deep_redact(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [deep_redact(v) for v in obj]
+    return obj
+
+def out(obj):
+    print(json.dumps(deep_redact(obj), ensure_ascii=False))
+
 # ---- deterministic normalization (what to strip / what to KEEP) ---------------
 STRIP_PATTERNS = [
-    (re.compile(r"\x1b\[[0-9;]*[A-Za-z]"), ""),                                # ANSI
+    (re.compile(r"\x1b\[[0-9;]*[A-Za-z]"), ""),
     (re.compile(r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[.\d]*Z?\b"), "<TS>"),
     (re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I), "<UUID>"),
     (re.compile(r"\b[0-9a-f]{16,64}\b", re.I), "<HASH>"),
     (re.compile(r"0x[0-9a-fA-F]{4,16}"), "<ADDR>"),
-    # absolute paths: quoted (may contain spaces), Windows drive, UNC, POSIX (any root)
     (re.compile(r"(['\"])(?:[A-Za-z]:[\\/]|\\\\|/)[^'\"]*\1"), "<PATH>"),
-    (re.compile(r"\\\\[^\s'\"():]+"), "<PATH>"),                                # UNC \\server\share\x
-    (re.compile(r"[A-Za-z]:[\\/][^\s'\"():]+"), "<PATH>"),                      # C:\x or C:/x
-    (re.compile(r"(?<![\w:./-])/(?:[\w.-]+/)+[\w.-]*"), "<PATH>"),               # /workspace/a/b (>=2 segments)
+    (re.compile(r"\\\\[^\s'\"():]+"), "<PATH>"),
+    (re.compile(r"[A-Za-z]:[\\/][^\s'\"():]+"), "<PATH>"),
+    (re.compile(r"(?<![\w:./-])/(?:[\w.-]+/)+[\w.-]*"), "<PATH>"),
     (re.compile(r"\bpid[ =:]?\d+\b", re.I), "<PID>"),
-    (re.compile(r":\d+:\d+\b"), ":<L>:<C>"),                                    # line:col
+    (re.compile(r":\d+:\d+\b"), ":<L>:<C>"),
     (re.compile(r"\bline \d+\b", re.I), "line <L>"),
     (re.compile(r"\b(?:localhost|127\.0\.0\.1):(\d{4,5})\b"), "localhost:<PORT>"),
 ]
-# KEEP (never stripped): HTTP status, errno, compiler codes (TS2345/E0308), versions, exit codes, tensor shapes.
-
 ERROR_CLASS_RE = re.compile(
     r"\b([A-Z][A-Za-z]*(?:Error|Exception|Warning)|ERR_[A-Z_]+|E[A-Z]{2,}[0-9]*|TS\d{4}|E\d{4}|panic|SIGSEGV|ENOENT|EADDRINUSE)\b")
 PKG_RE = re.compile(r"(?:node_modules[\\/](@?[\w.-]+(?:[\\/][\w.-]+)?)|site-packages[\\/]([\w.-]+)|from ['\"]([^'\"]+)['\"]|package ([\w.-]+))")
@@ -88,9 +101,14 @@ def normalize(text: str) -> str:
         text = pat.sub(rep, text)
     return text.strip()
 
+def norm_runtime(runtime) -> str:
+    """runtime is user input too: redact, then canonicalize (trim/lower, short, safe charset)."""
+    r = redact(str(runtime or ""))[:32].strip().lower()
+    return re.sub(r"[^a-z0-9._+-]", "", r)
+
 def extract(text: str, runtime: str = ""):
-    """text must already be redacted. runtime is case-insensitive."""
-    runtime = (runtime or "").strip().lower()
+    """text must already be redacted."""
+    runtime = norm_runtime(runtime)
     norm = normalize(text)
     lines = [l for l in norm.splitlines() if l.strip()]
     frames = [l.strip()[:200] for l in lines if FRAME_RE.match(l)][:3]
@@ -111,7 +129,21 @@ def extract(text: str, runtime: str = ""):
             "semantic_text": " ".join([error_class, package, tail] + frames)[:1000]}
 
 # ---- request loading / validation ------------------------------------------
-def load_request(path: str) -> dict:
+def _str_field(req, k, required, maxlen=MAX_FIELD_CHARS):
+    v = req.get(k)
+    if v is None or v == "":
+        if required:
+            raise UserError("request_schema", f"{k} is required and must be a non-empty string")
+        return ""
+    if not isinstance(v, str):
+        raise UserError("request_schema", f"{k} must be a string")
+    if required and not v.strip():
+        raise UserError("request_schema", f"{k} must not be blank")
+    if len(v) > maxlen:
+        raise UserError("request_too_large", f"{k} exceeds {maxlen} characters")
+    return redact(v).strip()
+
+def load_request(path: str, need_resolution: bool = False) -> dict:
     try:
         raw = Path(path).read_bytes()
     except OSError as exc:
@@ -133,20 +165,17 @@ def load_request(path: str) -> dict:
         raise UserError("request_empty", "error_text is empty")
     if len(et) > MAX_ERROR_CHARS:
         raise UserError("request_too_large", f"error_text exceeds {MAX_ERROR_CHARS} characters; send the tail of the log")
-    ctx = req.get("context", {})
-    if ctx is None:
-        ctx = {}
+    ctx = req.get("context") or {}
     if not isinstance(ctx, dict):
         raise UserError("request_schema", "context must be an object")
+    rt = ctx.get("runtime", "")
+    if rt is not None and not isinstance(rt, str):
+        raise UserError("request_schema", "context.runtime must be a string")
+    clean = {"error_text": redact(et),
+             "context": {"cwd": redact(str(ctx.get("cwd") or ""))[:1000], "runtime": norm_runtime(rt)}}
     for k in ("root_cause", "fix_command", "verify_method"):
-        if k in req and req[k] is not None and not isinstance(req[k], str):
-            raise UserError("request_schema", f"{k} must be a string")
-    # redact FIRST — nothing downstream ever sees the raw text
-    req["error_text"] = redact(et)
-    req["context"] = {"cwd": redact(str(ctx.get("cwd", ""))), "runtime": str(ctx.get("runtime", ""))}
-    for k in ("root_cause", "fix_command", "verify_method"):
-        req[k] = redact(req.get(k) or "")
-    return req
+        clean[k] = _str_field(req, k, required=need_resolution)
+    return clean
 
 # ---- db --------------------------------------------------------------------
 def db():
@@ -156,74 +185,115 @@ def db():
         conn = sqlite3.connect(DB_PATH, timeout=10)
         conn.executescript(SCHEMA)
     except sqlite3.DatabaseError as exc:
-        # corrupt file: move it aside (never delete), start fresh, tell the Host
         if conn is not None:
-            conn.close()                      # Windows: an open handle blocks the rename
+            conn.close()
         bad = DB_PATH.with_name(DB_PATH.name + f".corrupt-{int(time.time())}")
         try:
             os.replace(DB_PATH, bad)
         except OSError:
             raise UserError("db_corrupt", f"database unreadable ({exc}) and could not be moved aside")
-        raise UserError("db_corrupt", f"database was corrupt and has been moved to {redact(str(bad))}; a fresh DB will be created on next call")
+        raise UserError("db_corrupt", f"database was corrupt and has been moved to {bad}; a fresh DB will be created on next call")
     cols = {r[1] for r in conn.execute("PRAGMA table_info(pitfalls)")}
     if "attribution" not in cols:
         conn.execute("ALTER TABLE pitfalls ADD COLUMN attribution TEXT")
-    _migrate_redaction(conn)
+    _migrate(conn)
     return conn
 
-def _migrate_redaction(conn):
-    """One-time: rows written by <=0.3.0 stored un-redacted norm_tail/semantic_text. Re-redact in place."""
-    if conn.execute("SELECT v FROM meta WHERE k='redaction_migrated'").fetchone():
-        return
-    for pid, tail in conn.execute("SELECT id, norm_tail FROM pitfalls").fetchall():
-        r = redact(tail or "")
-        if r != tail:
-            conn.execute("UPDATE pitfalls SET norm_tail=? WHERE id=?", (r, pid))
-    # contentless FTS5 table: rows can't be deleted individually → 'delete-all' then rebuild from redacted rows
-    conn.execute("INSERT INTO pitfall_fts(pitfall_fts) VALUES('delete-all')")
-    for pid, ec, pkg, tail in conn.execute("SELECT id,error_class,package,norm_tail FROM pitfalls").fetchall():
-        conn.execute("INSERT INTO pitfall_fts(rowid,semantic_text) VALUES(?,?)",
-                     (pid, " ".join(x for x in (ec, pkg, tail) if x)[:1000]))
-    conn.execute("INSERT INTO meta(k,v) VALUES('redaction_migrated', ?)", (VERSION,))
+def _migrate(conn):
+    """One-time rescrubs for rows written by older versions (idempotent, keyed in meta)."""
+    if not conn.execute("SELECT v FROM meta WHERE k='redaction_migrated'").fetchone():
+        for pid, tail in conn.execute("SELECT id, norm_tail FROM pitfalls").fetchall():
+            r = redact(tail or "")
+            if r != tail:
+                conn.execute("UPDATE pitfalls SET norm_tail=? WHERE id=?", (r, pid))
+        conn.execute("INSERT INTO pitfall_fts(pitfall_fts) VALUES('delete-all')")
+        for pid, ec, pkg, tail in conn.execute("SELECT id,error_class,package,norm_tail FROM pitfalls").fetchall():
+            conn.execute("INSERT INTO pitfall_fts(rowid,semantic_text) VALUES(?,?)",
+                         (pid, " ".join(x for x in (ec, pkg, tail) if x)[:1000]))
+        conn.execute("INSERT INTO meta(k,v) VALUES('redaction_migrated', ?)", (VERSION,))
+    if not conn.execute("SELECT v FROM meta WHERE k='runtime_migrated'").fetchone():
+        for pid, rt in conn.execute("SELECT id, runtime FROM pitfalls").fetchall():
+            n = norm_runtime(rt)
+            if n != (rt or ""):
+                conn.execute("UPDATE pitfalls SET runtime=? WHERE id=?", (n, pid))
+        conn.execute("INSERT INTO meta(k,v) VALUES('runtime_migrated', ?)", (VERSION,))
     conn.commit()
 
-def out(obj, as_json=True):
-    print(json.dumps(obj, ensure_ascii=False, indent=None if as_json else 2))
+# ---- models ------------------------------------------------------------------
+def _spec(role):
+    return next((m for m in INFO["models"] if m.get("role") == role), None)
 
-# ---- model readiness / download kickoff (entry contract: exit 3 while pending) ----
-def _model_spec():
-    return INFO["models"][0]
-
-def model_ready() -> bool:
-    m = _model_spec(); d = MODELS_DIR / m["dir_name"]
+def _complete(m):
+    if not m:
+        return False
+    d = MODELS_DIR / m["dir_name"]
     return d.exists() and all((d / f).exists() and (d / f).stat().st_size > 0 for f in m["required_files"])
 
+def model_ready() -> bool:
+    return _complete(_spec("attribution"))
+
+def _pid_alive(pid):
+    try:
+        import ctypes
+        h = ctypes.windll.kernel32.OpenProcess(0x1000, False, int(pid))
+        if not h:
+            return False
+        ctypes.windll.kernel32.CloseHandle(h); return True
+    except Exception:
+        return False
+
 def _kickoff_download():
-    """Start download_model.py detached (idempotent: it exits fast if already complete/running)."""
-    lock = MODELS_DIR / (_model_spec()["dir_name"] + ".downloading")
-    if lock.exists() and time.time() - lock.stat().st_mtime < 3600:
-        return
-    MODELS_DIR.mkdir(parents=True, exist_ok=True); lock.touch()
+    """Start download_model.py detached, single-flight: the downloader's own lock file (holds PID) is the guard."""
+    m = _spec("attribution")
+    lock = MODELS_DIR / (m["dir_name"] + ".lock")
+    if lock.exists():
+        try:
+            pid = int(lock.read_text().strip() or 0)
+        except Exception:
+            pid = 0
+        if pid and _pid_alive(pid):
+            return "already_running"
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
     kw = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
     if os.name == "nt":
         kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
     subprocess.Popen([sys.executable, str(Path(__file__).with_name("download_model.py"))], **kw)
+    return "started"
+
+def _attribute(error_text, ctx):
+    if not FAKE and not model_ready():
+        _kickoff_download()
+        return {"pending": True, "note": "model downloading; rerun scripts\\run.ps1 --continue to finish, then retry"}
+    r = engine.attribute(error_text, ctx, timeout=MODEL_TIMEOUT_S)
+    return redact_card(r) if r else None
 
 def _embed(text):
-    """Vector from the resident embedder (fake in tests). None when unavailable → FTS-only retrieval."""
-    if os.environ.get("PITFALL_FAKE_MODEL") != "1" and not model_ready():
-        return None                       # don't spawn/download just for a vector
+    if not FAKE and not model_ready():
+        return None
     return engine.embed(text, spawn_wait=float(os.environ.get("PITFALL_EMBED_SPAWN_WAIT", "60")))
 
+# ---- retrieval ---------------------------------------------------------------
 def _store_embedding(conn, pid, vec):
     import struct
-    if not vec:
-        return
-    conn.execute("INSERT OR REPLACE INTO embeddings(pitfall_id,dim,vec) VALUES(?,?,?)",
-                 (pid, len(vec), struct.pack(f"{len(vec)}f", *vec)))
+    if vec:
+        conn.execute("INSERT OR REPLACE INTO embeddings(pitfall_id,dim,vec) VALUES(?,?,?)",
+                     (pid, len(vec), struct.pack(f"{len(vec)}f", *vec)))
+
+def _backfill_embeddings(conn, budget=BACKFILL_PER_LOOKUP):
+    """Lazy backfill for rows recorded without a vector (pre-v0.5 or embedder was down)."""
+    rows = conn.execute("SELECT p.id, p.error_class, p.package, p.norm_tail FROM pitfalls p "
+                        "LEFT JOIN embeddings e ON e.pitfall_id=p.id WHERE e.pitfall_id IS NULL LIMIT ?", (budget,)).fetchall()
+    n = 0
+    for pid, ec, pkg, tail in rows:
+        vec = _embed(" ".join(x for x in (ec, pkg, tail) if x)[:1000])
+        if not vec:
+            break
+        _store_embedding(conn, pid, vec); n += 1
+    if n:
+        conn.commit()
+    return n
 
 def _vector_rank(conn, qvec, limit=10):
-    """Cosine ranking over stored embeddings (unit vectors → dot product). Small N; pure Python is fine."""
     import struct
     if not qvec:
         return []
@@ -237,7 +307,6 @@ def _vector_rank(conn, qvec, limit=10):
     return [pid for _, pid in scored[:limit]]
 
 def _rrf(*ranked_lists, k=RRF_K):
-    """Reciprocal rank fusion: score(id) = Σ 1/(k + rank_i). Returns [(id, score)] best first."""
     score = {}
     for lst in ranked_lists:
         for rank, pid in enumerate(lst, 1):
@@ -245,30 +314,10 @@ def _rrf(*ranked_lists, k=RRF_K):
     return sorted(score.items(), key=lambda x: -x[1])
 
 def _env_compatible(conn, pid, runtime):
-    """Environment filter: a pit recorded under a different runtime is demoted, not hidden."""
     if not runtime:
         return True
     r = conn.execute("SELECT runtime FROM pitfalls WHERE id=?", (pid,)).fetchone()
     return (not r or not r[0] or r[0] == runtime)
-
-def _attribute(error_text, ctx):
-    """Structured guess from the local model. Soft: None on failure; kicks off download if model missing."""
-    if os.environ.get("PITFALL_FAKE_MODEL") != "1" and not model_ready():
-        _kickoff_download()
-        return {"pending": True, "note": "model downloading; rerun scripts\\run.ps1 --continue to finish, then retry"}
-    r = engine.attribute(error_text, ctx, timeout=MODEL_TIMEOUT_S)
-    return redact_card(r) if r else None
-
-# ---- commands ----------------------------------------------------------------
-def cmd_status(args):
-    conn = db()
-    n = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("pitfalls", "occurrences", "resolutions")}
-    verified = conn.execute("SELECT COUNT(*) FROM resolutions WHERE verified=1").fetchone()[0]
-    fts_ok = bool(conn.execute("SELECT 1 FROM sqlite_master WHERE name='pitfall_fts'").fetchone())
-    out({"ok": True, "db": redact(str(DB_PATH)), "pitfalls": n["pitfalls"], "occurrences": n["occurrences"],
-         "resolutions": n["resolutions"], "verified_resolutions": verified, "fts5": fts_ok,
-         "model": _model_spec()["dir_name"], "model_ready": model_ready(), "redaction": "on", "version": VERSION})
-    return 0
 
 def _resolution_for(conn, pid):
     r = conn.execute("SELECT root_cause,fix_command,verify_method,verified FROM resolutions "
@@ -278,51 +327,72 @@ def _resolution_for(conn, pid):
 def _hits(conn, pid):
     return conn.execute("SELECT COUNT(*),MAX(seen_at) FROM occurrences WHERE pitfall_id=?", (pid,)).fetchone()
 
+# ---- commands ----------------------------------------------------------------
+def cmd_status(args):
+    conn = db()
+    n = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("pitfalls", "occurrences", "resolutions", "embeddings")}
+    verified = conn.execute("SELECT COUNT(*) FROM resolutions WHERE verified=1").fetchone()[0]
+    fts_ok = bool(conn.execute("SELECT 1 FROM sqlite_master WHERE name='pitfall_fts'").fetchone())
+    emb = _spec("embedding")
+    out({"ok": True, "db": str(DB_PATH), "pitfalls": n["pitfalls"], "occurrences": n["occurrences"],
+         "resolutions": n["resolutions"], "verified_resolutions": verified, "embeddings": n["embeddings"], "fts5": fts_ok,
+         "model": _spec("attribution")["dir_name"], "model_ready": model_ready(),
+         "embedding_model": emb["dir_name"] if emb else None, "embedding_ready": _complete(emb),
+         "retrieval_mode": "hybrid" if (_complete(emb) or FAKE) else "fts-only",
+         "redaction": "on", "version": VERSION})
+    return 0
+
 def cmd_lookup(args):
     req = load_request(args.request_file); ctx = req["context"]
     feat = extract(req["error_text"], ctx["runtime"])
     conn = db()
     row = conn.execute("SELECT id FROM pitfalls WHERE exact_fp=?", (feat["exact_fp"],)).fetchone()
-    if row:                                      # 1) exact → 可引用 only with a verified resolution
+    if row:
         pid = row[0]; res = _resolution_for(conn, pid); hits = _hits(conn, pid)
         out({"hit": "exact", "confidence": "可引用" if (res and res["verified"]) else "需谨慎", "pitfall_id": pid,
              "times_seen": hits[0], "last_seen": hits[1], "resolution": res}); return 0
     total = conn.execute("SELECT COUNT(*) FROM pitfalls WHERE family_fp=?", (feat["family_fp"],)).fetchone()[0]
-    if total:                                    # 2) family → never 可引用
+    if total:
         rows = conn.execute("SELECT id, norm_tail FROM pitfalls WHERE family_fp=? ORDER BY created_at DESC LIMIT 3",
                             (feat["family_fp"],)).fetchall()
         pid = rows[0][0]; res = _resolution_for(conn, pid); hits = _hits(conn, pid)
         out({"hit": "family", "confidence": "需谨慎", "pitfall_id": pid, "family_size": total,
              "times_seen": hits[0], "last_seen": hits[1],
              "family_hint": "same error class/package, different details — verify before applying",
-             "known_variants": [redact(r[1]) for r in rows], "resolution": res}); return 0
-    # 3) semantic → 仅联想. Hybrid: FTS5/BM25 ranking ⊕ vector cosine ranking, fused by RRF,
-    #    then environment-compat demotion (different runtime sinks below compatible hits).
+             "known_variants": [r[1] for r in rows], "resolution": res}); return 0
+
+    # semantic: FTS5/BM25 ⊕ vector (optional), RRF-fused; a candidate qualifies if it is top-N in ANY channel.
     tokens = re.findall(r"[A-Za-z0-9_]{3,}", feat["semantic_text"])[:20]
     q = " OR ".join(f'"{t}"' for t in tokens)
     fts_rank = [r[0] for r in conn.execute(
         "SELECT rowid FROM pitfall_fts WHERE pitfall_fts MATCH ? ORDER BY bm25(pitfall_fts) LIMIT 10", (q,)).fetchall()] if q else []
-    vec_rank = _vector_rank(conn, _embed(feat["semantic_text"]))
+    qvec = _embed(feat["semantic_text"])
+    if qvec:
+        _backfill_embeddings(conn)
+    vec_rank = _vector_rank(conn, qvec)
     fused = _rrf(fts_rank, vec_rank)
-    compatible = [(pid, s) for pid, s in fused if _env_compatible(conn, pid, feat["runtime"])]
-    demoted = [(pid, s) for pid, s in fused if not _env_compatible(conn, pid, feat["runtime"])]
-    ordered = compatible + demoted
-    resp = None
-    if ordered and ordered[0][1] >= SEMANTIC_MIN:
-        pid, score = ordered[0]
+    def qualifies(pid):
+        return (pid in fts_rank[:SEMANTIC_MAX_RANK]) or (pid in vec_rank[:SEMANTIC_MAX_RANK])
+    good = [(pid, s) for pid, s in fused if qualifies(pid)]
+    compat = [x for x in good if _env_compatible(conn, x[0], feat["runtime"])]
+    chosen = compat[0] if compat else (good[0] if good else None)     # demote cross-runtime, never hide
+    if chosen:
+        pid, score = chosen
         resp = {"hit": "semantic", "confidence": "仅联想", "pitfall_id": pid, "resolution": _resolution_for(conn, pid),
-                "retrieval": {"fused_score": round(score, 4), "fts_rank": (fts_rank.index(pid) + 1) if pid in fts_rank else None,
+                "retrieval": {"fused_score": round(score, 4),
+                              "fts_rank": (fts_rank.index(pid) + 1) if pid in fts_rank else None,
                               "vec_rank": (vec_rank.index(pid) + 1) if pid in vec_rank else None,
-                              "channels": ["fts5"] + (["vector"] if vec_rank else []),
+                              "channels": [c for c, ok in (("fts5", pid in fts_rank), ("vector", pid in vec_rank)) if ok],
+                              "mode": "hybrid" if qvec else "fts-only",
                               "env_compatible": _env_compatible(conn, pid, feat["runtime"])}}
-    if resp is None:
+    else:
         resp = {"hit": "none", "confidence": None, "note": "no local history; solve fresh then propose+commit"}
-    if args.attribute:                            # fuzzy path only — model allowed here
+    if args.attribute:
         resp["attribution"] = _attribute(req["error_text"], ctx)
     out(resp); return 0
 
 def cmd_propose(args):
-    req = load_request(args.request_file); ctx = req["context"]
+    req = load_request(args.request_file, need_resolution=True); ctx = req["context"]
     feat = extract(req["error_text"], ctx["runtime"]); now = int(time.time())
     conn = db()
     row = conn.execute("SELECT id FROM pitfalls WHERE exact_fp=?", (feat["exact_fp"],)).fetchone()
@@ -330,7 +400,7 @@ def cmd_propose(args):
     if row:
         pid = row[0]
     else:
-        if not args.no_model:                     # first record of this pit → one model call
+        if not args.no_model:
             attribution = _attribute(req["error_text"], ctx)
         stored_attr = json.dumps(attribution, ensure_ascii=False) if attribution and not attribution.get("pending") else None
         try:
@@ -339,9 +409,9 @@ def cmd_propose(args):
                                                            feat["package"], feat["norm_tail"], now, stored_attr))
             pid = cur.lastrowid
             conn.execute("INSERT INTO pitfall_fts(rowid,semantic_text) VALUES(?,?)", (pid, feat["semantic_text"]))
-            if not args.no_model:                 # vector channel (soft: skipped when embedder unavailable)
+            if not args.no_model:
                 _store_embedding(conn, pid, _embed(feat["semantic_text"]))
-        except sqlite3.IntegrityError:            # concurrent propose of the same fingerprint
+        except sqlite3.IntegrityError:
             pid = conn.execute("SELECT id FROM pitfalls WHERE exact_fp=?", (feat["exact_fp"],)).fetchone()[0]
     conn.execute("INSERT INTO occurrences(pitfall_id,cwd,raw_head,seen_at) VALUES(?,?,?,?)",
                  (pid, ctx["cwd"], req["error_text"][:500], now))
@@ -358,9 +428,13 @@ def cmd_commit(args):
     conn = db()
     if int(args.verify_exit_code) != 0:
         out({"ok": False, "note": "verification failed; proposal stays unverified"}); return 1
-    n = conn.execute("UPDATE resolutions SET verified=1, verified_at=? WHERE id=?", (int(time.time()), args.id)).rowcount
-    conn.commit()
-    out({"ok": bool(n), "resolution_id": args.id, "state": "verified" if n else "no such proposal"}); return 0 if n else 1
+    r = conn.execute("SELECT root_cause,fix_command,verify_method FROM resolutions WHERE id=?", (args.id,)).fetchone()
+    if not r:
+        out({"ok": False, "error": "no_such_proposal", "resolution_id": args.id}); return 1
+    if not all((x or "").strip() for x in r):
+        out({"ok": False, "error": "empty_resolution", "message": "a resolution needs non-empty root_cause, fix_command and verify_method before it can be verified"}); return 1
+    conn.execute("UPDATE resolutions SET verified=1, verified_at=? WHERE id=?", (int(time.time()), args.id)); conn.commit()
+    out({"ok": True, "resolution_id": args.id, "state": "verified"}); return 0
 
 def cmd_digest(args):
     conn = db()
@@ -383,7 +457,7 @@ def cmd_server(args):
     if args.action == "status":
         st = engine.status(); out(st or {"ok": False, "state": "down"}); return 0 if st else 1
     if args.action == "start":
-        if os.environ.get("PITFALL_FAKE_MODEL") != "1" and not model_ready():
+        if not FAKE and not model_ready():
             _kickoff_download(); out({"ok": False, "state": "downloading", "note": "rerun scripts\\run.ps1 --continue"}); return 3
         st = engine.ensure_server(); out(st or {"ok": False, "state": "failed to start"}); return 0 if st else 1
     if args.action == "stop":
@@ -395,9 +469,9 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("status"); s.add_argument("--json", action="store_true")
     s = sub.add_parser("lookup"); s.add_argument("--request-file", required=True); s.add_argument("--json", action="store_true")
-    s.add_argument("--attribute", action="store_true", help="on semantic/none results also ask the local model (slow, ~15-25s CPU)")
+    s.add_argument("--attribute", action="store_true", help="on semantic/none results also ask the local model (slow, ~10-25s CPU)")
     s = sub.add_parser("propose"); s.add_argument("--request-file", required=True); s.add_argument("--json", action="store_true")
-    s.add_argument("--no-model", action="store_true", help="skip the one-time model attribution on first record")
+    s.add_argument("--no-model", action="store_true", help="skip model attribution and embedding on first record")
     s = sub.add_parser("commit"); s.add_argument("--id", required=True); s.add_argument("--verify-exit-code", required=True, type=int)
     s.add_argument("--json", action="store_true")
     s = sub.add_parser("digest"); s.add_argument("--out"); s.add_argument("--json", action="store_true")
@@ -407,9 +481,9 @@ def main():
         return {"status": cmd_status, "lookup": cmd_lookup, "propose": cmd_propose, "commit": cmd_commit,
                 "digest": cmd_digest, "server": cmd_server}[args.cmd](args)
     except UserError as exc:
-        out({"ok": False, "error": exc.code, "message": redact(str(exc))}); return exc.exit_code
+        out({"ok": False, "error": exc.code, "message": str(exc)}); return exc.exit_code
     except sqlite3.DatabaseError as exc:
-        out({"ok": False, "error": "db_error", "message": redact(str(exc))}); return 1
+        out({"ok": False, "error": "db_error", "message": str(exc)}); return 1
 
 if __name__ == "__main__":
     sys.exit(main())
