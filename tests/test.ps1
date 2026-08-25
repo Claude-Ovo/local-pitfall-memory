@@ -4,10 +4,14 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 $Run  = Join-Path $Root 'scripts\run.ps1'
 $env:PITFALL_DB = Join-Path $env:TEMP "pitfall-test-$(Get-Random).db"
+$env:PITFALL_FAKE_MODEL = '1'   # tests never load OpenVINO; real-model check is scripts\smoke_model.py
 
 Write-Output '== unit tests'
 python (Join-Path $PSScriptRoot 'test_unit.py')
 if ($LASTEXITCODE -ne 0) { Write-Output 'UNIT FAIL'; exit 1 }
+Write-Output '== server protocol tests (fake model)'
+python (Join-Path $PSScriptRoot 'test_server.py')
+if ($LASTEXITCODE -ne 0) { Write-Output 'SERVER FAIL'; exit 1 }
 Write-Output '== e2e through run.ps1'
 python (Join-Path $PSScriptRoot 'make_fixtures.py') $PSScriptRoot | Out-Null
 
@@ -27,6 +31,7 @@ $s = Step 'cross'   { & $Run lookup --request-file (Join-Path $PSScriptRoot 'req
 $s = Step 'negative'{ & $Run lookup --request-file (Join-Path $PSScriptRoot 'req3.json') --json }; if ($s -match '"hit": "exact"')  { exit 1 }
 $s = Step 'digest'  { & $Run digest };                                                             if ($s -notmatch 'ERR_REQUIRE_ESM') { exit 1 }
 
+& $Run server stop --json | Out-Null
 Remove-Item $env:PITFALL_DB -ErrorAction SilentlyContinue
 Write-Output 'ALL PASS'
 exit 0

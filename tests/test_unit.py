@@ -82,7 +82,7 @@ class TestLookupChain(unittest.TestCase):
     """End-to-end through the CLI with an isolated DB: none → propose → family → commit → exact."""
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.env = dict(os.environ, PITFALL_DB=str(Path(self.tmp.name) / "t.db"))
+        self.env = dict(os.environ, PITFALL_DB=str(Path(self.tmp.name) / "t.db"), PITFALL_FAKE_MODEL="1")
         self.py = sys.executable
         self.cli = str(ROOT / "scripts" / "client.py")
 
