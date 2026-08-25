@@ -1,5 +1,7 @@
-# local inference (day-2: attribution extractor)
-openvino-genai>=2026.0
-# model download with resume (ModelScope hub)
-modelscope>=1.20
-# no other runtime deps: storage/retrieval use stdlib sqlite3 (FTS5)
+# Pinned to the combination verified on 2026-08-25 (Windows 10 x64, Python 3.13, CPU):
+#   Qwen3-4B-int4-ov load 6.4s / structured extraction 15-17s / JSON valid.
+openvino-genai==2026.3.0.0
+openvino==2026.3.0
+openvino-tokenizers==2026.3.0.0
+modelscope==1.39.1
+# storage/retrieval use stdlib sqlite3 (FTS5) — no other runtime deps

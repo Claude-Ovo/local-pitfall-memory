@@ -4764,3 +4764,528 @@ with tempfile.TemporaryDirectory() as td:
 
 hook: PostToolUse
 hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Recurse -Filter SKILL.md -File 'C:\\Users\\miku\\local-ai-skill-authoring\\assets' | Select-Object -First 1 -ExpandProperty FullName | ForEach-Object { Write-Output ('=== ' + "'$_); Get-Content -Raw -Encoding UTF8 $_ }' in C:\Users\miku\local-pitfall-memory
+hook: PreToolUse Completed
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Recurse -Filter meta.json -File 'C:\\Users\\miku\\local-ai-skill-authoring\\assets' | Select-Object -First 2 -ExpandProperty FullName | ForEach-Object { Write-Output ('=== ' + "'$_); Get-Content -Raw -Encoding UTF8 $_ }' in C:\Users\miku\local-pitfall-memory
+hook: PreToolUse Completed
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Recurse -Filter run.ps1 -File 'C:\\Users\\miku\\local-ai-skill-authoring\\assets' | Select-Object -First 1 -ExpandProperty FullName | ForEach-Object { Write-Output ('=== ' + "'$_); $i=0; Get-Content -Encoding UTF8 $_ | ForEach-Object { $i++; '"'{0,4}: {1}' -f "'$i,$_ } }' in C:\Users\miku\local-pitfall-memory
+ succeeded in 2259ms:
+hook: PostToolUse
+ succeeded in 2369ms:
+hook: PostToolUse
+ succeeded in 2246ms:
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+2026-08-25T14:39:01.167044Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 94 column 5
+codex
+HEAD 快照的两套指定测试均通过；独立反例则稳定复现了 3 个 P0：明文进入 `pitfalls.norm_tail` 并被 digest 回传、公共 IPv6 不脱敏、空报错可被提交后作为 exact/“可引用”命中。另有官方 resume 入口实际不可用。并发同指纹 32 进程压力尝试未复现失败，FTS 参数化/令牌白名单也未发现注入点。现在我会整理为工单规定格式并追加到 #1。
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $i=0; Get-Content -Encoding UTF8 -LiteralPath '"'docs\\collab\\CODEX_CHANNEL.md' | ForEach-Object { "'$i++; '"'{0,4}: {1}' -f "'$i,$_ }' in C:\Users\miku\local-pitfall-memory
+ succeeded in 2128ms:
+   1: # CODEX_CHANNEL — CC ⇄ Codex 交接本（local-pitfall-memory）
+   2: 
+   3: 规则同 Sensei：编号工单，谁写谁署名（[CC] / [Codex]），追加不删改。做完在原条目下写"→ 完成/阻塞/问题"。
+   4: 项目背景先读：`C:\Users\miku\Desktop\魔搭项目进度.md`（权威进度）和 `C:\Users\miku\sensei\docs\MODELSCOPE-SKILL-PLAN.md` 第 6 节（终版方案）。
+   5: 
+   6: ---
+   7: 
+   8: ## #1 [CC] 2026-08-25 22:15 · 代码审查工单：v0.2.0 全量审（队长要求"都要让 codex 审一遍"）
+   9: 
+  10: **审什么**（仓库 `C:\Users\miku\local-pitfall-memory`，HEAD = v0.2.0 commit）：
+  11: - `scripts/client.py` —— 归一化 / 双层指纹 / lookup 三级链（exact→family→semantic）/ propose→commit / digest
+  12: - `scripts/redact.py` —— 从 Sensei redact.ts 移植的脱敏层
+  13: - `scripts/run.ps1`、`install-env.ps1`、`download_model.py`、`smoke_model.py`
+  14: - `SKILL.md` / `info.json` / `meta.json` 是否符合 `C:\Users\miku\local-ai-skill-authoring\references\file-reference.md` 的规范
+  15: - `tests/test_unit.py` + `tests/test.ps1`
+  16: 
+  17: **审查视角（按优先级）**：
+  18: 1. **正确性**：指纹归一化有没有漏抹/误抹（尤其：什么该抹、什么绝不能抹——见 client.py 顶部注释与 MODELSCOPE-SKILL-PLAN.md 第 6 节"指纹三层"）；family 层会不会把不同根因错并；FTS5 查询串构造有没有注入/语法炸点
+  19: 2. **安全**：脱敏是否有漏网形态（比对 Sensei 原版 `C:\Users\miku\sensei\packages\cli\src\lib\redact.ts`）；返回给 Host 的每个字段是否都过了 redact；DB 里是否可能残留明文密钥
+  20: 3. **官方规范符合度**：对照 `local-ai-skill-authoring/references/*.md`——run.ps1 入口契约、退出码、UTF-8、info.json 字段、SKILL.md frontmatter 路由描述质量
+  21: 4. **鲁棒性**：空输入、超长输入、非 UTF-8、并发写 SQLite、DB 损坏时的行为
+  22: 5. **可维护性**：别提"重构成类"这种大改；只提能在 30 分钟内落地的具体改动
+  23: 
+  24: **输出要求**：
+  25: - 写回本条目下，署名 [Codex]，格式：`[严重度 P0/P1/P2] 文件:行 — 问题 — 建议改法`
+  26: - P0 = 会导致错误命中/漏脱敏/入口契约违规；P1 = 明显缺陷；P2 = 打磨
+  27: - **不要直接改代码**，只审只写。CC 看完回执后决定采纳哪些
+  28: - 跑一遍 `python tests/test_unit.py` 和 `powershell -File tests/test.ps1` 确认你审的是能通过的版本；如果你发现测试覆盖的盲区，列出来（写测试用例名即可）
+  29: 
+  30: **背景数据（供判断用）**：
+  31: - 库里已有 2 条真实数据（ERR_REQUIRE_ESM、PS1 无 BOM）
+  32: - Qwen3-4B INT4 @ OpenVINO CPU 实测：load 6.4s / 一次结构化抽取 17.5s / JSON 合法 → 所以归因器**必须不在 lookup 热路径上**，这是设计前提，审的时候按这个前提看
+  33: - 宿主 Qoder CLI v1.1.29 已实测能自动触发本 Skill（证据在 docs/evidence/）
+
+hook: PostToolUse
+hook: PostToolUse Completed
+2026-08-25T14:39:31.495925Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 94 column 5
+hook: PreToolUse
+hook: PreToolUse Completed
+apply patch
+2026-08-25T14:40:29.382739Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 94 column 5
+patch: completed
+C:\Users\miku\local-pitfall-memory\docs\collab\CODEX_CHANNEL.md
+diff --git a/docs/collab/CODEX_CHANNEL.md b/docs/collab/CODEX_CHANNEL.md
+index 2df1633684ee87da893f57ffdef286a1c485f82b..1007aca4c7dcf41ca39ee6e85820b45ca03772af
+--- a/docs/collab/CODEX_CHANNEL.md
++++ b/docs/collab/CODEX_CHANNEL.md
+@@ -31,3 +31,24 @@
+ - 库里已有 2 条真实数据（ERR_REQUIRE_ESM、PS1 无 BOM）
+ - Qwen3-4B INT4 @ OpenVINO CPU 实测：load 6.4s / 一次结构化抽取 17.5s / JSON 合法 → 所以归因器**必须不在 lookup 热路径上**，这是设计前提，审的时候按这个前提看
+ - 宿主 Qoder CLI v1.1.29 已实测能自动触发本 Skill（证据在 docs/evidence/）
++
++### [Codex] → 问题（审查基线：HEAD `5a13266` / v0.2.0）
++
++结论：**暂不通过**。两条指定测试在 `git archive HEAD` 的干净快照中均返回 0（`python tests/test_unit.py`：12/12；`powershell -File tests/test.ps1`：ALL PASS），但独立反例稳定复现 4 个 P0。FTS5 的 `MATCH ?` 参数化 + token 白名单未发现注入/语法炸点；32 个进程并发 propose 同一指纹本次未复现失败；family 命中确实封顶“需谨慎”。
++
++- [严重度 P0] scripts/client.py:188 — `pitfalls.norm_tail` 和 `pitfall_fts.semantic_text` 在 `redact()` 前写库，注释“everything stored is redacted”不成立；用合成 `authorization=<secret>` 反例可在 `norm_tail` 读到明文，verified 后 `digest` 还会把它原样回给 Host — 先对 error text 做脱敏再 `extract/INSERT`，`digest` 输出再兜底 `redact`，并迁移/清洗既有行；新增 `test_redacts_pitfall_norm_tail_fts_and_digest`
++- [严重度 P0] scripts/redact.py:27 — 规则只处理 IPv4，公共 IPv6（反例 `2001:4860:4860::8888`）完全不变，与“public IPs are masked”承诺冲突 — 用 `ipaddress` 做 token 级 IPv4/IPv6 判定并保留私网/回环；新增 `test_redacts_public_ipv6`
++- [严重度 P0] scripts/client.py:135 — `error_text` 不校验；空字符串能 propose→commit，之后空字符串会 exact/“可引用”命中，形成无语义的错误高置信命中 — lookup/propose 入口拒绝缺失、非字符串、trim 后为空及超限输入；新增 `test_rejects_empty_error_text`、`test_rejects_oversized_error_text`
++- [严重度 P0] scripts/run.ps1:23 — 文档承诺的 `scripts\run.ps1 --continue` 实际被直接转发给要求子命令的 argparse，HEAD 反例立即报“required: cmd”；首次调用也没有任何路径调用 `download_model.py`，且下载中退出码实现为 2 而规范要求 3 — 在入口显式实现 pending request/`--continue`，首次缺模型时启动下载，下载未完 `exit 3`，并加 `test_continue_resume_contract`
++- [严重度 P0] scripts/run.ps1:1 — 官方入口契约要求第一行就是 `$ErrorActionPreference = 'Stop'` 且 Python 前做 platform/hardware gate；当前第一行是注释、gate 被明确跳过 — 把 Stop 语句移到第一行；按宿主约定实现检测，若确实支持任意 CPU，也要用可执行检查明确“不支持”的出口而不是空 gate
++- [严重度 P1] scripts/download_model.py:31 — 下载结果直接删掉 final 目录再 `copytree` 到 final，未使用 `.partial` + 校验后原子改名；中断会丢掉原有好模型并留下“半成品 final” — 复制到同盘 `.partial`，校验 `required_files` 后 `os.replace`/目录交换，失败保留旧 final；新增 `test_download_is_atomic`
++- [严重度 P1] scripts/client.py:49 — “任意绝对路径”归一化只覆盖盘符无空格路径及少数 Unix 根；`/workspace/...`、`/builds/...`、UNC、含空格路径会残留，同一错误换工作目录后 exact_fp 不同（已用 `/workspace/a` vs `/builds/b` 复现） — 补通用 Windows/UNC/POSIX 绝对路径规则，并对 `runtime` 做 `strip().lower()`；新增 `test_normalizes_workspace_unc_and_space_paths`、`test_runtime_is_case_insensitive`
++- [严重度 P1] scripts/client.py:119 — 非 UTF-8、坏 JSON、缺字段/错误类型均直接抛 traceback；非 UTF-8 反例退出 1 且暴露 `UnicodeDecodeError`，没有稳定 JSON 错误契约 — 捕获 decode/JSON/schema 错误，向 Host 返回脱敏结构化错误并退出 1；新增 `test_non_utf8_request_returns_structured_error`、`test_malformed_request_schema`
++- [严重度 P1] scripts/client.py:96 — DB 损坏时 `status` 直接抛 `sqlite3.DatabaseError: file is not a database`；无诊断、备份或恢复提示 — 捕获 `DatabaseError`，返回结构化错误并建议/执行可恢复的损坏库改名重建流程；新增 `test_corrupt_db_returns_structured_error`
++- [严重度 P1] scripts/install-env.ps1:9 — `.deps-installed` 只看存在，不绑定 `requirements.txt` 内容；依赖升级后永远跳过，且 line 13 用系统 `python` 建 venv，忽略 `info.json.python_version=3.11` — marker 存 requirements hash + Python 版本，变化即重装，并用指定版本的 `uv/python` 创建环境
++- [严重度 P1] requirements.txt:2 — OpenVINO/ModelScope 只设下限，无法复现已验证组合，和官方“critical versions pin”要求冲突 — 固定已实测版本或安全的窄区间，并让上条 marker 对版本变化失效
++- [严重度 P1] scripts/client.py:112 — `model_ready` 硬编码只查 `.bin/.xml`，忽略 `info.json.required_files` 里的 `config.json`、tokenizer，也与 downloader 的配置源重复 — 从 `info.json` 唯一读取 model dir/required_files 并逐项非空校验；新增 `test_status_uses_info_required_files`
++- [严重度 P1] SKILL.md:3 — frontmatter description 实测约 1136 字符，超过官方 1024 上限，可能影响发布校验/路由；line 28 还把 `verified` 描述成顶层字段，而实际位于 `resolution.verified` — 压缩 supported inputs 段到正文，frontmatter 保留双语触发词与 prefer 规则；同步真实返回 schema；新增 `test_skill_frontmatter_contract`
++- [严重度 P1] meta.json:3 — 元数据仍报 `0.1.0`，与 client/HEAD 的 `0.2.0` 不一致；同时不符合 file-reference 示例字段（缺 `name/display_description/detail_describe/icon`，用了 `description`） — 同步版本并按发布端 schema 补齐/改名；新增 `test_metadata_schema_and_version`
++- [严重度 P2] scripts/client.py:151 — family 查询 `LIMIT 3` 后用 `len(rows)` 当 `family_size`，超过 3 个变体时永远误报 3 — 另做 `COUNT(*)`，列表仍保留 top 3；新增 `test_family_size_reports_full_count`
++- [严重度 P2] tests/test_unit.py:11 — 当前 12 项只覆盖 happy path，未固化并发写、DB 损坏、非 UTF-8、空/超长输入、resume/metadata 契约这些工单明确要求的边界 — 补 `test_concurrent_propose_same_fingerprint`、`test_corrupt_db_returns_structured_error`、`test_non_utf8_request_returns_structured_error`、`test_rejects_empty_error_text`、`test_rejects_oversized_error_text`、`test_continue_resume_contract`、`test_metadata_schema_and_version`
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/docs/collab/CODEX_CHANNEL.md b/docs/collab/CODEX_CHANNEL.md
+index 2df1633684ee87da893f57ffdef286a1c485f82b..1007aca4c7dcf41ca39ee6e85820b45ca03772af
+--- a/docs/collab/CODEX_CHANNEL.md
++++ b/docs/collab/CODEX_CHANNEL.md
+@@ -31,3 +31,24 @@
+ - 库里已有 2 条真实数据（ERR_REQUIRE_ESM、PS1 无 BOM）
+ - Qwen3-4B INT4 @ OpenVINO CPU 实测：load 6.4s / 一次结构化抽取 17.5s / JSON 合法 → 所以归因器**必须不在 lookup 热路径上**，这是设计前提，审的时候按这个前提看
+ - 宿主 Qoder CLI v1.1.29 已实测能自动触发本 Skill（证据在 docs/evidence/）
++
++### [Codex] → 问题（审查基线：HEAD `5a13266` / v0.2.0）
++
++结论：**暂不通过**。两条指定测试在 `git archive HEAD` 的干净快照中均返回 0（`python tests/test_unit.py`：12/12；`powershell -File tests/test.ps1`：ALL PASS），但独立反例稳定复现 4 个 P0。FTS5 的 `MATCH ?` 参数化 + token 白名单未发现注入/语法炸点；32 个进程并发 propose 同一指纹本次未复现失败；family 命中确实封顶“需谨慎”。
++
++- [严重度 P0] scripts/client.py:188 — `pitfalls.norm_tail` 和 `pitfall_fts.semantic_text` 在 `redact()` 前写库，注释“everything stored is redacted”不成立；用合成 `authorization=<secret>` 反例可在 `norm_tail` 读到明文，verified 后 `digest` 还会把它原样回给 Host — 先对 error text 做脱敏再 `extract/INSERT`，`digest` 输出再兜底 `redact`，并迁移/清洗既有行；新增 `test_redacts_pitfall_norm_tail_fts_and_digest`
++- [严重度 P0] scripts/redact.py:27 — 规则只处理 IPv4，公共 IPv6（反例 `2001:4860:4860::8888`）完全不变，与“public IPs are masked”承诺冲突 — 用 `ipaddress` 做 token 级 IPv4/IPv6 判定并保留私网/回环；新增 `test_redacts_public_ipv6`
++- [严重度 P0] scripts/client.py:135 — `error_text` 不校验；空字符串能 propose→commit，之后空字符串会 exact/“可引用”命中，形成无语义的错误高置信命中 — lookup/propose 入口拒绝缺失、非字符串、trim 后为空及超限输入；新增 `test_rejects_empty_error_text`、`test_rejects_oversized_error_text`
++- [严重度 P0] scripts/run.ps1:23 — 文档承诺的 `scripts\run.ps1 --continue` 实际被直接转发给要求子命令的 argparse，HEAD 反例立即报“required: cmd”；首次调用也没有任何路径调用 `download_model.py`，且下载中退出码实现为 2 而规范要求 3 — 在入口显式实现 pending request/`--continue`，首次缺模型时启动下载，下载未完 `exit 3`，并加 `test_continue_resume_contract`
++- [严重度 P0] scripts/run.ps1:1 — 官方入口契约要求第一行就是 `$ErrorActionPreference = 'Stop'` 且 Python 前做 platform/hardware gate；当前第一行是注释、gate 被明确跳过 — 把 Stop 语句移到第一行；按宿主约定实现检测，若确实支持任意 CPU，也要用可执行检查明确“不支持”的出口而不是空 gate
++- [严重度 P1] scripts/download_model.py:31 — 下载结果直接删掉 final 目录再 `copytree` 到 final，未使用 `.partial` + 校验后原子改名；中断会丢掉原有好模型并留下“半成品 final” — 复制到同盘 `.partial`，校验 `required_files` 后 `os.replace`/目录交换，失败保留旧 final；新增 `test_download_is_atomic`
++- [严重度 P1] scripts/client.py:49 — “任意绝对路径”归一化只覆盖盘符无空格路径及少数 Unix 根；`/workspace/...`、`/builds/...`、UNC、含空格路径会残留，同一错误换工作目录后 exact_fp 不同（已用 `/workspace/a` vs `/builds/b` 复现） — 补通用 Windows/UNC/POSIX 绝对路径规则，并对 `runtime` 做 `strip().lower()`；新增 `test_normalizes_workspace_unc_and_space_paths`、`test_runtime_is_case_insensitive`
++- [严重度 P1] scripts/client.py:119 — 非 UTF-8、坏 JSON、缺字段/错误类型均直接抛 traceback；非 UTF-8 反例退出 1 且暴露 `UnicodeDecodeError`，没有稳定 JSON 错误契约 — 捕获 decode/JSON/schema 错误，向 Host 返回脱敏结构化错误并退出 1；新增 `test_non_utf8_request_returns_structured_error`、`test_malformed_request_schema`
++- [严重度 P1] scripts/client.py:96 — DB 损坏时 `status` 直接抛 `sqlite3.DatabaseError: file is not a database`；无诊断、备份或恢复提示 — 捕获 `DatabaseError`，返回结构化错误并建议/执行可恢复的损坏库改名重建流程；新增 `test_corrupt_db_returns_structured_error`
++- [严重度 P1] scripts/install-env.ps1:9 — `.deps-installed` 只看存在，不绑定 `requirements.txt` 内容；依赖升级后永远跳过，且 line 13 用系统 `python` 建 venv，忽略 `info.json.python_version=3.11` — marker 存 requirements hash + Python 版本，变化即重装，并用指定版本的 `uv/python` 创建环境
++- [严重度 P1] requirements.txt:2 — OpenVINO/ModelScope 只设下限，无法复现已验证组合，和官方“critical versions pin”要求冲突 — 固定已实测版本或安全的窄区间，并让上条 marker 对版本变化失效
++- [严重度 P1] scripts/client.py:112 — `model_ready` 硬编码只查 `.bin/.xml`，忽略 `info.json.required_files` 里的 `config.json`、tokenizer，也与 downloader 的配置源重复 — 从 `info.json` 唯一读取 model dir/required_files 并逐项非空校验；新增 `test_status_uses_info_required_files`
++- [严重度 P1] SKILL.md:3 — frontmatter description 实测约 1136 字符，超过官方 1024 上限，可能影响发布校验/路由；line 28 还把 `verified` 描述成顶层字段，而实际位于 `resolution.verified` — 压缩 supported inputs 段到正文，frontmatter 保留双语触发词与 prefer 规则；同步真实返回 schema；新增 `test_skill_frontmatter_contract`
++- [严重度 P1] meta.json:3 — 元数据仍报 `0.1.0`，与 client/HEAD 的 `0.2.0` 不一致；同时不符合 file-reference 示例字段（缺 `name/display_description/detail_describe/icon`，用了 `description`） — 同步版本并按发布端 schema 补齐/改名；新增 `test_metadata_schema_and_version`
++- [严重度 P2] scripts/client.py:151 — family 查询 `LIMIT 3` 后用 `len(rows)` 当 `family_size`，超过 3 个变体时永远误报 3 — 另做 `COUNT(*)`，列表仍保留 top 3；新增 `test_family_size_reports_full_count`
++- [严重度 P2] tests/test_unit.py:11 — 当前 12 项只覆盖 happy path，未固化并发写、DB 损坏、非 UTF-8、空/超长输入、resume/metadata 契约这些工单明确要求的边界 — 补 `test_concurrent_propose_same_fingerprint`、`test_corrupt_db_returns_structured_error`、`test_non_utf8_request_returns_structured_error`、`test_rejects_empty_error_text`、`test_rejects_oversized_error_text`、`test_continue_resume_contract`、`test_metadata_schema_and_version`
+
+2026-08-25T14:40:31.586123Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 94 column 5
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short' in C:\Users\miku\local-pitfall-memory
+hook: PreToolUse Completed
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --name-only -- scripts tests' in C:\Users\miku\local-pitfall-memory
+hook: PreToolUse Completed
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-Content -Encoding UTF8 -LiteralPath 'docs\\collab\\CODEX_CHANNEL.md' | Select-Object -Last 45" in C:\Users\miku\local-pitfall-memory
+hook: PreToolUse Completed
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-FileHash -Algorithm SHA256 -LiteralPath 'docs\\collab\\CODEX_CHANNEL.md' | Select-Object -ExpandProperty Hash" in C:\Users\miku\local-pitfall-memory
+ succeeded in 2169ms:
+hook: PostToolUse
+ succeeded in 2303ms:
+ M docs/collab/CODEX_CHANNEL.md
+ M docs/collab/codex-run-1.log
+warning: unable to access 'C:\Users\miku/.config/git/ignore': Permission denied
+warning: unable to access 'C:\Users\miku/.config/git/ignore': Permission denied
+
+hook: PostToolUse
+ succeeded in 2281ms:
+**审什么**（仓库 `C:\Users\miku\local-pitfall-memory`，HEAD = v0.2.0 commit）：
+- `scripts/client.py` —— 归一化 / 双层指纹 / lookup 三级链（exact→family→semantic）/ propose→commit / digest
+- `scripts/redact.py` —— 从 Sensei redact.ts 移植的脱敏层
+- `scripts/run.ps1`、`install-env.ps1`、`download_model.py`、`smoke_model.py`
+- `SKILL.md` / `info.json` / `meta.json` 是否符合 `C:\Users\miku\local-ai-skill-authoring\references\file-reference.md` 的规范
+- `tests/test_unit.py` + `tests/test.ps1`
+
+**审查视角（按优先级）**：
+1. **正确性**：指纹归一化有没有漏抹/误抹（尤其：什么该抹、什么绝不能抹——见 client.py 顶部注释与 MODELSCOPE-SKILL-PLAN.md 第 6 节"指纹三层"）；family 层会不会把不同根因错并；FTS5 查询串构造有没有注入/语法炸点
+2. **安全**：脱敏是否有漏网形态（比对 Sensei 原版 `C:\Users\miku\sensei\packages\cli\src\lib\redact.ts`）；返回给 Host 的每个字段是否都过了 redact；DB 里是否可能残留明文密钥
+3. **官方规范符合度**：对照 `local-ai-skill-authoring/references/*.md`——run.ps1 入口契约、退出码、UTF-8、info.json 字段、SKILL.md frontmatter 路由描述质量
+4. **鲁棒性**：空输入、超长输入、非 UTF-8、并发写 SQLite、DB 损坏时的行为
+5. **可维护性**：别提"重构成类"这种大改；只提能在 30 分钟内落地的具体改动
+
+**输出要求**：
+- 写回本条目下，署名 [Codex]，格式：`[严重度 P0/P1/P2] 文件:行 — 问题 — 建议改法`
+- P0 = 会导致错误命中/漏脱敏/入口契约违规；P1 = 明显缺陷；P2 = 打磨
+- **不要直接改代码**，只审只写。CC 看完回执后决定采纳哪些
+- 跑一遍 `python tests/test_unit.py` 和 `powershell -File tests/test.ps1` 确认你审的是能通过的版本；如果你发现测试覆盖的盲区，列出来（写测试用例名即可）
+
+**背景数据（供判断用）**：
+- 库里已有 2 条真实数据（ERR_REQUIRE_ESM、PS1 无 BOM）
+- Qwen3-4B INT4 @ OpenVINO CPU 实测：load 6.4s / 一次结构化抽取 17.5s / JSON 合法 → 所以归因器**必须不在 lookup 热路径上**，这是设计前提，审的时候按这个前提看
+- 宿主 Qoder CLI v1.1.29 已实测能自动触发本 Skill（证据在 docs/evidence/）
+
+### [Codex] → 问题（审查基线：HEAD `5a13266` / v0.2.0）
+
+结论：**暂不通过**。两条指定测试在 `git archive HEAD` 的干净快照中均返回 0（`python tests/test_unit.py`：12/12；`powershell -File tests/test.ps1`：ALL PASS），但独立反例稳定复现 4 个 P0。FTS5 的 `MATCH ?` 参数化 + token 白名单未发现注入/语法炸点；32 个进程并发 propose 同一指纹本次未复现失败；family 命中确实封顶“需谨慎”。
+
+- [严重度 P0] scripts/client.py:188 — `pitfalls.norm_tail` 和 `pitfall_fts.semantic_text` 在 `redact()` 前写库，注释“everything stored is redacted”不成立；用合成 `authorization=<secret>` 反例可在 `norm_tail` 读到明文，verified 后 `digest` 还会把它原样回给 Host — 先对 error text 做脱敏再 `extract/INSERT`，`digest` 输出再兜底 `redact`，并迁移/清洗既有行；新增 `test_redacts_pitfall_norm_tail_fts_and_digest`
+- [严重度 P0] scripts/redact.py:27 — 规则只处理 IPv4，公共 IPv6（反例 `2001:4860:4860::8888`）完全不变，与“public IPs are masked”承诺冲突 — 用 `ipaddress` 做 token 级 IPv4/IPv6 判定并保留私网/回环；新增 `test_redacts_public_ipv6`
+- [严重度 P0] scripts/client.py:135 — `error_text` 不校验；空字符串能 propose→commit，之后空字符串会 exact/“可引用”命中，形成无语义的错误高置信命中 — lookup/propose 入口拒绝缺失、非字符串、trim 后为空及超限输入；新增 `test_rejects_empty_error_text`、`test_rejects_oversized_error_text`
+- [严重度 P0] scripts/run.ps1:23 — 文档承诺的 `scripts\run.ps1 --continue` 实际被直接转发给要求子命令的 argparse，HEAD 反例立即报“required: cmd”；首次调用也没有任何路径调用 `download_model.py`，且下载中退出码实现为 2 而规范要求 3 — 在入口显式实现 pending request/`--continue`，首次缺模型时启动下载，下载未完 `exit 3`，并加 `test_continue_resume_contract`
+- [严重度 P0] scripts/run.ps1:1 — 官方入口契约要求第一行就是 `$ErrorActionPreference = 'Stop'` 且 Python 前做 platform/hardware gate；当前第一行是注释、gate 被明确跳过 — 把 Stop 语句移到第一行；按宿主约定实现检测，若确实支持任意 CPU，也要用可执行检查明确“不支持”的出口而不是空 gate
+- [严重度 P1] scripts/download_model.py:31 — 下载结果直接删掉 final 目录再 `copytree` 到 final，未使用 `.partial` + 校验后原子改名；中断会丢掉原有好模型并留下“半成品 final” — 复制到同盘 `.partial`，校验 `required_files` 后 `os.replace`/目录交换，失败保留旧 final；新增 `test_download_is_atomic`
+- [严重度 P1] scripts/client.py:49 — “任意绝对路径”归一化只覆盖盘符无空格路径及少数 Unix 根；`/workspace/...`、`/builds/...`、UNC、含空格路径会残留，同一错误换工作目录后 exact_fp 不同（已用 `/workspace/a` vs `/builds/b` 复现） — 补通用 Windows/UNC/POSIX 绝对路径规则，并对 `runtime` 做 `strip().lower()`；新增 `test_normalizes_workspace_unc_and_space_paths`、`test_runtime_is_case_insensitive`
+- [严重度 P1] scripts/client.py:119 — 非 UTF-8、坏 JSON、缺字段/错误类型均直接抛 traceback；非 UTF-8 反例退出 1 且暴露 `UnicodeDecodeError`，没有稳定 JSON 错误契约 — 捕获 decode/JSON/schema 错误，向 Host 返回脱敏结构化错误并退出 1；新增 `test_non_utf8_request_returns_structured_error`、`test_malformed_request_schema`
+- [严重度 P1] scripts/client.py:96 — DB 损坏时 `status` 直接抛 `sqlite3.DatabaseError: file is not a database`；无诊断、备份或恢复提示 — 捕获 `DatabaseError`，返回结构化错误并建议/执行可恢复的损坏库改名重建流程；新增 `test_corrupt_db_returns_structured_error`
+- [严重度 P1] scripts/install-env.ps1:9 — `.deps-installed` 只看存在，不绑定 `requirements.txt` 内容；依赖升级后永远跳过，且 line 13 用系统 `python` 建 venv，忽略 `info.json.python_version=3.11` — marker 存 requirements hash + Python 版本，变化即重装，并用指定版本的 `uv/python` 创建环境
+- [严重度 P1] requirements.txt:2 — OpenVINO/ModelScope 只设下限，无法复现已验证组合，和官方“critical versions pin”要求冲突 — 固定已实测版本或安全的窄区间，并让上条 marker 对版本变化失效
+- [严重度 P1] scripts/client.py:112 — `model_ready` 硬编码只查 `.bin/.xml`，忽略 `info.json.required_files` 里的 `config.json`、tokenizer，也与 downloader 的配置源重复 — 从 `info.json` 唯一读取 model dir/required_files 并逐项非空校验；新增 `test_status_uses_info_required_files`
+- [严重度 P1] SKILL.md:3 — frontmatter description 实测约 1136 字符，超过官方 1024 上限，可能影响发布校验/路由；line 28 还把 `verified` 描述成顶层字段，而实际位于 `resolution.verified` — 压缩 supported inputs 段到正文，frontmatter 保留双语触发词与 prefer 规则；同步真实返回 schema；新增 `test_skill_frontmatter_contract`
+- [严重度 P1] meta.json:3 — 元数据仍报 `0.1.0`，与 client/HEAD 的 `0.2.0` 不一致；同时不符合 file-reference 示例字段（缺 `name/display_description/detail_describe/icon`，用了 `description`） — 同步版本并按发布端 schema 补齐/改名；新增 `test_metadata_schema_and_version`
+- [严重度 P2] scripts/client.py:151 — family 查询 `LIMIT 3` 后用 `len(rows)` 当 `family_size`，超过 3 个变体时永远误报 3 — 另做 `COUNT(*)`，列表仍保留 top 3；新增 `test_family_size_reports_full_count`
+- [严重度 P2] tests/test_unit.py:11 — 当前 12 项只覆盖 happy path，未固化并发写、DB 损坏、非 UTF-8、空/超长输入、resume/metadata 契约这些工单明确要求的边界 — 补 `test_concurrent_propose_same_fingerprint`、`test_corrupt_db_returns_structured_error`、`test_non_utf8_request_returns_structured_error`、`test_rejects_empty_error_text`、`test_rejects_oversized_error_text`、`test_continue_resume_contract`、`test_metadata_schema_and_version`
+
+hook: PostToolUse
+ succeeded in 2399ms:
+9D05850308B924F7D4C8C45A2FBD38BA7FE9FA3AA0F6D114D048C03B9577A668
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+diff --git a/docs/collab/CODEX_CHANNEL.md b/docs/collab/CODEX_CHANNEL.md
+index 2df1633684ee87da893f57ffdef286a1c485f82b..1007aca4c7dcf41ca39ee6e85820b45ca03772af
+--- a/docs/collab/CODEX_CHANNEL.md
++++ b/docs/collab/CODEX_CHANNEL.md
+@@ -31,3 +31,24 @@
+ - 库里已有 2 条真实数据（ERR_REQUIRE_ESM、PS1 无 BOM）
+ - Qwen3-4B INT4 @ OpenVINO CPU 实测：load 6.4s / 一次结构化抽取 17.5s / JSON 合法 → 所以归因器**必须不在 lookup 热路径上**，这是设计前提，审的时候按这个前提看
+ - 宿主 Qoder CLI v1.1.29 已实测能自动触发本 Skill（证据在 docs/evidence/）
++
++### [Codex] → 问题（审查基线：HEAD `5a13266` / v0.2.0）
++
++结论：**暂不通过**。两条指定测试在 `git archive HEAD` 的干净快照中均返回 0（`python tests/test_unit.py`：12/12；`powershell -File tests/test.ps1`：ALL PASS），但独立反例稳定复现 4 个 P0。FTS5 的 `MATCH ?` 参数化 + token 白名单未发现注入/语法炸点；32 个进程并发 propose 同一指纹本次未复现失败；family 命中确实封顶“需谨慎”。
++
++- [严重度 P0] scripts/client.py:188 — `pitfalls.norm_tail` 和 `pitfall_fts.semantic_text` 在 `redact()` 前写库，注释“everything stored is redacted”不成立；用合成 `authorization=<secret>` 反例可在 `norm_tail` 读到明文，verified 后 `digest` 还会把它原样回给 Host — 先对 error text 做脱敏再 `extract/INSERT`，`digest` 输出再兜底 `redact`，并迁移/清洗既有行；新增 `test_redacts_pitfall_norm_tail_fts_and_digest`
++- [严重度 P0] scripts/redact.py:27 — 规则只处理 IPv4，公共 IPv6（反例 `2001:4860:4860::8888`）完全不变，与“public IPs are masked”承诺冲突 — 用 `ipaddress` 做 token 级 IPv4/IPv6 判定并保留私网/回环；新增 `test_redacts_public_ipv6`
++- [严重度 P0] scripts/client.py:135 — `error_text` 不校验；空字符串能 propose→commit，之后空字符串会 exact/“可引用”命中，形成无语义的错误高置信命中 — lookup/propose 入口拒绝缺失、非字符串、trim 后为空及超限输入；新增 `test_rejects_empty_error_text`、`test_rejects_oversized_error_text`
++- [严重度 P0] scripts/run.ps1:23 — 文档承诺的 `scripts\run.ps1 --continue` 实际被直接转发给要求子命令的 argparse，HEAD 反例立即报“required: cmd”；首次调用也没有任何路径调用 `download_model.py`，且下载中退出码实现为 2 而规范要求 3 — 在入口显式实现 pending request/`--continue`，首次缺模型时启动下载，下载未完 `exit 3`，并加 `test_continue_resume_contract`
++- [严重度 P0] scripts/run.ps1:1 — 官方入口契约要求第一行就是 `$ErrorActionPreference = 'Stop'` 且 Python 前做 platform/hardware gate；当前第一行是注释、gate 被明确跳过 — 把 Stop 语句移到第一行；按宿主约定实现检测，若确实支持任意 CPU，也要用可执行检查明确“不支持”的出口而不是空 gate
++- [严重度 P1] scripts/download_model.py:31 — 下载结果直接删掉 final 目录再 `copytree` 到 final，未使用 `.partial` + 校验后原子改名；中断会丢掉原有好模型并留下“半成品 final” — 复制到同盘 `.partial`，校验 `required_files` 后 `os.replace`/目录交换，失败保留旧 final；新增 `test_download_is_atomic`
++- [严重度 P1] scripts/client.py:49 — “任意绝对路径”归一化只覆盖盘符无空格路径及少数 Unix 根；`/workspace/...`、`/builds/...`、UNC、含空格路径会残留，同一错误换工作目录后 exact_fp 不同（已用 `/workspace/a` vs `/builds/b` 复现） — 补通用 Windows/UNC/POSIX 绝对路径规则，并对 `runtime` 做 `strip().lower()`；新增 `test_normalizes_workspace_unc_and_space_paths`、`test_runtime_is_case_insensitive`
++- [严重度 P1] scripts/client.py:119 — 非 UTF-8、坏 JSON、缺字段/错误类型均直接抛 traceback；非 UTF-8 反例退出 1 且暴露 `UnicodeDecodeError`，没有稳定 JSON 错误契约 — 捕获 decode/JSON/schema 错误，向 Host 返回脱敏结构化错误并退出 1；新增 `test_non_utf8_request_returns_structured_error`、`test_malformed_request_schema`
++- [严重度 P1] scripts/client.py:96 — DB 损坏时 `status` 直接抛 `sqlite3.DatabaseError: file is not a database`；无诊断、备份或恢复提示 — 捕获 `DatabaseError`，返回结构化错误并建议/执行可恢复的损坏库改名重建流程；新增 `test_corrupt_db_returns_structured_error`
++- [严重度 P1] scripts/install-env.ps1:9 — `.deps-installed` 只看存在，不绑定 `requirements.txt` 内容；依赖升级后永远跳过，且 line 13 用系统 `python` 建 venv，忽略 `info.json.python_version=3.11` — marker 存 requirements hash + Python 版本，变化即重装，并用指定版本的 `uv/python` 创建环境
++- [严重度 P1] requirements.txt:2 — OpenVINO/ModelScope 只设下限，无法复现已验证组合，和官方“critical versions pin”要求冲突 — 固定已实测版本或安全的窄区间，并让上条 marker 对版本变化失效
++- [严重度 P1] scripts/client.py:112 — `model_ready` 硬编码只查 `.bin/.xml`，忽略 `info.json.required_files` 里的 `config.json`、tokenizer，也与 downloader 的配置源重复 — 从 `info.json` 唯一读取 model dir/required_files 并逐项非空校验；新增 `test_status_uses_info_required_files`
++- [严重度 P1] SKILL.md:3 — frontmatter description 实测约 1136 字符，超过官方 1024 上限，可能影响发布校验/路由；line 28 还把 `verified` 描述成顶层字段，而实际位于 `resolution.verified` — 压缩 supported inputs 段到正文，frontmatter 保留双语触发词与 prefer 规则；同步真实返回 schema；新增 `test_skill_frontmatter_contract`
++- [严重度 P1] meta.json:3 — 元数据仍报 `0.1.0`，与 client/HEAD 的 `0.2.0` 不一致；同时不符合 file-reference 示例字段（缺 `name/display_description/detail_describe/icon`，用了 `description`） — 同步版本并按发布端 schema 补齐/改名；新增 `test_metadata_schema_and_version`
++- [严重度 P2] scripts/client.py:151 — family 查询 `LIMIT 3` 后用 `len(rows)` 当 `family_size`，超过 3 个变体时永远误报 3 — 另做 `COUNT(*)`，列表仍保留 top 3；新增 `test_family_size_reports_full_count`
++- [严重度 P2] tests/test_unit.py:11 — 当前 12 项只覆盖 happy path，未固化并发写、DB 损坏、非 UTF-8、空/超长输入、resume/metadata 契约这些工单明确要求的边界 — 补 `test_concurrent_propose_same_fingerprint`、`test_corrupt_db_returns_structured_error`、`test_non_utf8_request_returns_structured_error`、`test_rejects_empty_error_text`、`test_rejects_oversized_error_text`、`test_continue_resume_contract`、`test_metadata_schema_and_version`
+
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; git diff -- docs/collab/CODEX_CHANNEL.md' in C:\Users\miku\local-pitfall-memory
+hook: PreToolUse Completed
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git log -3 --oneline --decorate' in C:\Users\miku\local-pitfall-memory
+hook: PreToolUse Completed
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git rev-parse HEAD' in C:\Users\miku\local-pitfall-memory
+ succeeded in 2562ms:
+390b58dd2908c05fd124de84f023eaff546a46bf
+
+hook: PostToolUse
+ succeeded in 2575ms:
+390b58d (HEAD -> master) v0.3.0: resident attribution engine (server.py, named-pipe protocol) + engine.py soft-fail bridge; model only on first-record propose / lookup --attribute; fake-model switch for tests; server subcommand
+5a13266 v0.2.0: redaction layer (ported from Sensei), family-level lookup path, fix message-line fingerprinting, unit tests, model downloader + smoke test
+164b5e0 docs: Qoder CLI integration evidence (discovery, natural + explicit trigger, session log)
+
+hook: PostToolUse
+ succeeded in 2666ms:
+diff --git a/docs/collab/CODEX_CHANNEL.md b/docs/collab/CODEX_CHANNEL.md
+index 2df1633..1007aca 100644
+--- a/docs/collab/CODEX_CHANNEL.md
++++ b/docs/collab/CODEX_CHANNEL.md
+@@ -31,3 +31,24 @@
+ - 库里已有 2 条真实数据（ERR_REQUIRE_ESM、PS1 无 BOM）
+ - Qwen3-4B INT4 @ OpenVINO CPU 实测：load 6.4s / 一次结构化抽取 17.5s / JSON 合法 → 所以归因器**必须不在 lookup 热路径上**，这是设计前提，审的时候按这个前提看
+ - 宿主 Qoder CLI v1.1.29 已实测能自动触发本 Skill（证据在 docs/evidence/）
++
++### [Codex] → 问题（审查基线：HEAD `5a13266` / v0.2.0）
++
++结论：**暂不通过**。两条指定测试在 `git archive HEAD` 的干净快照中均返回 0（`python tests/test_unit.py`：12/12；`powershell -File tests/test.ps1`：ALL PASS），但独立反例稳定复现 4 个 P0。FTS5 的 `MATCH ?` 参数化 + token 白名单未发现注入/语法炸点；32 个进程并发 propose 同一指纹本次未复现失败；family 命中确实封顶“需谨慎”。
++
++- [严重度 P0] scripts/client.py:188 — `pitfalls.norm_tail` 和 `pitfall_fts.semantic_text` 在 `redact()` 前写库，注释“everything stored is redacted”不成立；用合成 `authorization=<secret>` 反例可在 `norm_tail` 读到明文，verified 后 `digest` 还会把它原样回给 Host — 先对 error text 做脱敏再 `extract/INSERT`，`digest` 输出再兜底 `redact`，并迁移/清洗既有行；新增 `test_redacts_pitfall_norm_tail_fts_and_digest`
++- [严重度 P0] scripts/redact.py:27 — 规则只处理 IPv4，公共 IPv6（反例 `2001:4860:4860::8888`）完全不变，与“public IPs are masked”承诺冲突 — 用 `ipaddress` 做 token 级 IPv4/IPv6 判定并保留私网/回环；新增 `test_redacts_public_ipv6`
++- [严重度 P0] scripts/client.py:135 — `error_text` 不校验；空字符串能 propose→commit，之后空字符串会 exact/“可引用”命中，形成无语义的错误高置信命中 — lookup/propose 入口拒绝缺失、非字符串、trim 后为空及超限输入；新增 `test_rejects_empty_error_text`、`test_rejects_oversized_error_text`
++- [严重度 P0] scripts/run.ps1:23 — 文档承诺的 `scripts\run.ps1 --continue` 实际被直接转发给要求子命令的 argparse，HEAD 反例立即报“required: cmd”；首次调用也没有任何路径调用 `download_model.py`，且下载中退出码实现为 2 而规范要求 3 — 在入口显式实现 pending request/`--continue`，首次缺模型时启动下载，下载未完 `exit 3`，并加 `test_continue_resume_contract`
++- [严重度 P0] scripts/run.ps1:1 — 官方入口契约要求第一行就是 `$ErrorActionPreference = 'Stop'` 且 Python 前做 platform/hardware gate；当前第一行是注释、gate 被明确跳过 — 把 Stop 语句移到第一行；按宿主约定实现检测，若确实支持任意 CPU，也要用可执行检查明确“不支持”的出口而不是空 gate
++- [严重度 P1] scripts/download_model.py:31 — 下载结果直接删掉 final 目录再 `copytree` 到 final，未使用 `.partial` + 校验后原子改名；中断会丢掉原有好模型并留下“半成品 final” — 复制到同盘 `.partial`，校验 `required_files` 后 `os.replace`/目录交换，失败保留旧 final；新增 `test_download_is_atomic`
++- [严重度 P1] scripts/client.py:49 — “任意绝对路径”归一化只覆盖盘符无空格路径及少数 Unix 根；`/workspace/...`、`/builds/...`、UNC、含空格路径会残留，同一错误换工作目录后 exact_fp 不同（已用 `/workspace/a` vs `/builds/b` 复现） — 补通用 Windows/UNC/POSIX 绝对路径规则，并对 `runtime` 做 `strip().lower()`；新增 `test_normalizes_workspace_unc_and_space_paths`、`test_runtime_is_case_insensitive`
++- [严重度 P1] scripts/client.py:119 — 非 UTF-8、坏 JSON、缺字段/错误类型均直接抛 traceback；非 UTF-8 反例退出 1 且暴露 `UnicodeDecodeError`，没有稳定 JSON 错误契约 — 捕获 decode/JSON/schema 错误，向 Host 返回脱敏结构化错误并退出 1；新增 `test_non_utf8_request_returns_structured_error`、`test_malformed_request_schema`
++- [严重度 P1] scripts/client.py:96 — DB 损坏时 `status` 直接抛 `sqlite3.DatabaseError: file is not a database`；无诊断、备份或恢复提示 — 捕获 `DatabaseError`，返回结构化错误并建议/执行可恢复的损坏库改名重建流程；新增 `test_corrupt_db_returns_structured_error`
++- [严重度 P1] scripts/install-env.ps1:9 — `.deps-installed` 只看存在，不绑定 `requirements.txt` 内容；依赖升级后永远跳过，且 line 13 用系统 `python` 建 venv，忽略 `info.json.python_version=3.11` — marker 存 requirements hash + Python 版本，变化即重装，并用指定版本的 `uv/python` 创建环境
++- [严重度 P1] requirements.txt:2 — OpenVINO/ModelScope 只设下限，无法复现已验证组合，和官方“critical versions pin”要求冲突 — 固定已实测版本或安全的窄区间，并让上条 marker 对版本变化失效
++- [严重度 P1] scripts/client.py:112 — `model_ready` 硬编码只查 `.bin/.xml`，忽略 `info.json.required_files` 里的 `config.json`、tokenizer，也与 downloader 的配置源重复 — 从 `info.json` 唯一读取 model dir/required_files 并逐项非空校验；新增 `test_status_uses_info_required_files`
++- [严重度 P1] SKILL.md:3 — frontmatter description 实测约 1136 字符，超过官方 1024 上限，可能影响发布校验/路由；line 28 还把 `verified` 描述成顶层字段，而实际位于 `resolution.verified` — 压缩 supported inputs 段到正文，frontmatter 保留双语触发词与 prefer 规则；同步真实返回 schema；新增 `test_skill_frontmatter_contract`
++- [严重度 P1] meta.json:3 — 元数据仍报 `0.1.0`，与 client/HEAD 的 `0.2.0` 不一致；同时不符合 file-reference 示例字段（缺 `name/display_description/detail_describe/icon`，用了 `description`） — 同步版本并按发布端 schema 补齐/改名；新增 `test_metadata_schema_and_version`
++- [严重度 P2] scripts/client.py:151 — family 查询 `LIMIT 3` 后用 `len(rows)` 当 `family_size`，超过 3 个变体时永远误报 3 — 另做 `COUNT(*)`，列表仍保留 top 3；新增 `test_family_size_reports_full_count`
++- [严重度 P2] tests/test_unit.py:11 — 当前 12 项只覆盖 happy path，未固化并发写、DB 损坏、非 UTF-8、空/超长输入、resume/metadata 契约这些工单明确要求的边界 — 补 `test_concurrent_propose_same_fingerprint`、`test_corrupt_db_returns_structured_error`、`test_non_utf8_request_returns_structured_error`、`test_rejects_empty_error_text`、`test_rejects_oversized_error_text`、`test_continue_resume_contract`、`test_metadata_schema_and_version`
+warning: in the working copy of 'docs/collab/CODEX_CHANNEL.md', LF will be replaced by CRLF the next time Git touches it
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+diff --git a/docs/collab/CODEX_CHANNEL.md b/docs/collab/CODEX_CHANNEL.md
+index 2df1633684ee87da893f57ffdef286a1c485f82b..1007aca4c7dcf41ca39ee6e85820b45ca03772af
+--- a/docs/collab/CODEX_CHANNEL.md
++++ b/docs/collab/CODEX_CHANNEL.md
+@@ -31,3 +31,24 @@
+ - 库里已有 2 条真实数据（ERR_REQUIRE_ESM、PS1 无 BOM）
+ - Qwen3-4B INT4 @ OpenVINO CPU 实测：load 6.4s / 一次结构化抽取 17.5s / JSON 合法 → 所以归因器**必须不在 lookup 热路径上**，这是设计前提，审的时候按这个前提看
+ - 宿主 Qoder CLI v1.1.29 已实测能自动触发本 Skill（证据在 docs/evidence/）
++
++### [Codex] → 问题（审查基线：HEAD `5a13266` / v0.2.0）
++
++结论：**暂不通过**。两条指定测试在 `git archive HEAD` 的干净快照中均返回 0（`python tests/test_unit.py`：12/12；`powershell -File tests/test.ps1`：ALL PASS），但独立反例稳定复现 4 个 P0。FTS5 的 `MATCH ?` 参数化 + token 白名单未发现注入/语法炸点；32 个进程并发 propose 同一指纹本次未复现失败；family 命中确实封顶“需谨慎”。
++
++- [严重度 P0] scripts/client.py:188 — `pitfalls.norm_tail` 和 `pitfall_fts.semantic_text` 在 `redact()` 前写库，注释“everything stored is redacted”不成立；用合成 `authorization=<secret>` 反例可在 `norm_tail` 读到明文，verified 后 `digest` 还会把它原样回给 Host — 先对 error text 做脱敏再 `extract/INSERT`，`digest` 输出再兜底 `redact`，并迁移/清洗既有行；新增 `test_redacts_pitfall_norm_tail_fts_and_digest`
++- [严重度 P0] scripts/redact.py:27 — 规则只处理 IPv4，公共 IPv6（反例 `2001:4860:4860::8888`）完全不变，与“public IPs are masked”承诺冲突 — 用 `ipaddress` 做 token 级 IPv4/IPv6 判定并保留私网/回环；新增 `test_redacts_public_ipv6`
++- [严重度 P0] scripts/client.py:135 — `error_text` 不校验；空字符串能 propose→commit，之后空字符串会 exact/“可引用”命中，形成无语义的错误高置信命中 — lookup/propose 入口拒绝缺失、非字符串、trim 后为空及超限输入；新增 `test_rejects_empty_error_text`、`test_rejects_oversized_error_text`
++- [严重度 P0] scripts/run.ps1:23 — 文档承诺的 `scripts\run.ps1 --continue` 实际被直接转发给要求子命令的 argparse，HEAD 反例立即报“required: cmd”；首次调用也没有任何路径调用 `download_model.py`，且下载中退出码实现为 2 而规范要求 3 — 在入口显式实现 pending request/`--continue`，首次缺模型时启动下载，下载未完 `exit 3`，并加 `test_continue_resume_contract`
++- [严重度 P0] scripts/run.ps1:1 — 官方入口契约要求第一行就是 `$ErrorActionPreference = 'Stop'` 且 Python 前做 platform/hardware gate；当前第一行是注释、gate 被明确跳过 — 把 Stop 语句移到第一行；按宿主约定实现检测，若确实支持任意 CPU，也要用可执行检查明确“不支持”的出口而不是空 gate
++- [严重度 P1] scripts/download_model.py:31 — 下载结果直接删掉 final 目录再 `copytree` 到 final，未使用 `.partial` + 校验后原子改名；中断会丢掉原有好模型并留下“半成品 final” — 复制到同盘 `.partial`，校验 `required_files` 后 `os.replace`/目录交换，失败保留旧 final；新增 `test_download_is_atomic`
++- [严重度 P1] scripts/client.py:49 — “任意绝对路径”归一化只覆盖盘符无空格路径及少数 Unix 根；`/workspace/...`、`/builds/...`、UNC、含空格路径会残留，同一错误换工作目录后 exact_fp 不同（已用 `/workspace/a` vs `/builds/b` 复现） — 补通用 Windows/UNC/POSIX 绝对路径规则，并对 `runtime` 做 `strip().lower()`；新增 `test_normalizes_workspace_unc_and_space_paths`、`test_runtime_is_case_insensitive`
++- [严重度 P1] scripts/client.py:119 — 非 UTF-8、坏 JSON、缺字段/错误类型均直接抛 traceback；非 UTF-8 反例退出 1 且暴露 `UnicodeDecodeError`，没有稳定 JSON 错误契约 — 捕获 decode/JSON/schema 错误，向 Host 返回脱敏结构化错误并退出 1；新增 `test_non_utf8_request_returns_structured_error`、`test_malformed_request_schema`
++- [严重度 P1] scripts/client.py:96 — DB 损坏时 `status` 直接抛 `sqlite3.DatabaseError: file is not a database`；无诊断、备份或恢复提示 — 捕获 `DatabaseError`，返回结构化错误并建议/执行可恢复的损坏库改名重建流程；新增 `test_corrupt_db_returns_structured_error`
++- [严重度 P1] scripts/install-env.ps1:9 — `.deps-installed` 只看存在，不绑定 `requirements.txt` 内容；依赖升级后永远跳过，且 line 13 用系统 `python` 建 venv，忽略 `info.json.python_version=3.11` — marker 存 requirements hash + Python 版本，变化即重装，并用指定版本的 `uv/python` 创建环境
++- [严重度 P1] requirements.txt:2 — OpenVINO/ModelScope 只设下限，无法复现已验证组合，和官方“critical versions pin”要求冲突 — 固定已实测版本或安全的窄区间，并让上条 marker 对版本变化失效
++- [严重度 P1] scripts/client.py:112 — `model_ready` 硬编码只查 `.bin/.xml`，忽略 `info.json.required_files` 里的 `config.json`、tokenizer，也与 downloader 的配置源重复 — 从 `info.json` 唯一读取 model dir/required_files 并逐项非空校验；新增 `test_status_uses_info_required_files`
++- [严重度 P1] SKILL.md:3 — frontmatter description 实测约 1136 字符，超过官方 1024 上限，可能影响发布校验/路由；line 28 还把 `verified` 描述成顶层字段，而实际位于 `resolution.verified` — 压缩 supported inputs 段到正文，frontmatter 保留双语触发词与 prefer 规则；同步真实返回 schema；新增 `test_skill_frontmatter_contract`
++- [严重度 P1] meta.json:3 — 元数据仍报 `0.1.0`，与 client/HEAD 的 `0.2.0` 不一致；同时不符合 file-reference 示例字段（缺 `name/display_description/detail_describe/icon`，用了 `description`） — 同步版本并按发布端 schema 补齐/改名；新增 `test_metadata_schema_and_version`
++- [严重度 P2] scripts/client.py:151 — family 查询 `LIMIT 3` 后用 `len(rows)` 当 `family_size`，超过 3 个变体时永远误报 3 — 另做 `COUNT(*)`，列表仍保留 top 3；新增 `test_family_size_reports_full_count`
++- [严重度 P2] tests/test_unit.py:11 — 当前 12 项只覆盖 happy path，未固化并发写、DB 损坏、非 UTF-8、空/超长输入、resume/metadata 契约这些工单明确要求的边界 — 补 `test_concurrent_propose_same_fingerprint`、`test_corrupt_db_returns_structured_error`、`test_non_utf8_request_returns_structured_error`、`test_rejects_empty_error_text`、`test_rejects_oversized_error_text`、`test_continue_resume_contract`、`test_metadata_schema_and_version`
+
+hook: PreToolUse
+hook: PreToolUse Completed
+apply patch
+patch: completed
+C:\Users\miku\local-pitfall-memory\docs\collab\CODEX_CHANNEL.md
+diff --git a/docs/collab/CODEX_CHANNEL.md b/docs/collab/CODEX_CHANNEL.md
+index 2df1633684ee87da893f57ffdef286a1c485f82b..5fcd558aaf9006bbe2b25242242c63c0b67d3c71
+--- a/docs/collab/CODEX_CHANNEL.md
++++ b/docs/collab/CODEX_CHANNEL.md
+@@ -31,3 +31,24 @@
+ - 库里已有 2 条真实数据（ERR_REQUIRE_ESM、PS1 无 BOM）
+ - Qwen3-4B INT4 @ OpenVINO CPU 实测：load 6.4s / 一次结构化抽取 17.5s / JSON 合法 → 所以归因器**必须不在 lookup 热路径上**，这是设计前提，审的时候按这个前提看
+ - 宿主 Qoder CLI v1.1.29 已实测能自动触发本 Skill（证据在 docs/evidence/）
++
++### [Codex] → 问题（审查基线：HEAD `5a13266` / v0.2.0）
++
++结论：**暂不通过**。两条指定测试在 `git archive HEAD` 的干净快照中均返回 0（`python tests/test_unit.py`：12/12；`powershell -File tests/test.ps1`：ALL PASS），但独立审查确认 5 个 P0，其中 4 个有运行时反例、1 个是官方入口静态契约违规。FTS5 的 `MATCH ?` 参数化 + token 白名单未发现注入/语法炸点；32 个进程并发 propose 同一指纹本次未复现失败；family 命中确实封顶“需谨慎”。
++
++- [严重度 P0] scripts/client.py:188 — `pitfalls.norm_tail` 和 `pitfall_fts.semantic_text` 在 `redact()` 前写库，注释“everything stored is redacted”不成立；用合成 `authorization=<secret>` 反例可在 `norm_tail` 读到明文，verified 后 `digest` 还会把它原样回给 Host — 先对 error text 做脱敏再 `extract/INSERT`，`digest` 输出再兜底 `redact`，并迁移/清洗既有行；新增 `test_redacts_pitfall_norm_tail_fts_and_digest`
++- [严重度 P0] scripts/redact.py:27 — 规则只处理 IPv4，公共 IPv6（反例 `2001:4860:4860::8888`）完全不变，与“public IPs are masked”承诺冲突 — 用 `ipaddress` 做 token 级 IPv4/IPv6 判定并保留私网/回环；新增 `test_redacts_public_ipv6`
++- [严重度 P0] scripts/client.py:135 — `error_text` 不校验；空字符串能 propose→commit，之后空字符串会 exact/“可引用”命中，形成无语义的错误高置信命中 — lookup/propose 入口拒绝缺失、非字符串、trim 后为空及超限输入；新增 `test_rejects_empty_error_text`、`test_rejects_oversized_error_text`
++- [严重度 P0] scripts/run.ps1:23 — 文档承诺的 `scripts\run.ps1 --continue` 实际被直接转发给要求子命令的 argparse，HEAD 反例立即报“required: cmd”；首次调用也没有任何路径调用 `download_model.py`，且下载中退出码实现为 2 而规范要求 3 — 在入口显式实现 pending request/`--continue`，首次缺模型时启动下载，下载未完 `exit 3`，并加 `test_continue_resume_contract`
++- [严重度 P0] scripts/run.ps1:1 — 官方入口契约要求第一行就是 `$ErrorActionPreference = 'Stop'` 且 Python 前做 platform/hardware gate；当前第一行是注释、gate 被明确跳过 — 把 Stop 语句移到第一行；按宿主约定实现检测，若确实支持任意 CPU，也要用可执行检查明确“不支持”的出口而不是空 gate
++- [严重度 P1] scripts/download_model.py:31 — 下载结果直接删掉 final 目录再 `copytree` 到 final，未使用 `.partial` + 校验后原子改名；中断会丢掉原有好模型并留下“半成品 final” — 复制到同盘 `.partial`，校验 `required_files` 后 `os.replace`/目录交换，失败保留旧 final；新增 `test_download_is_atomic`
++- [严重度 P1] scripts/client.py:49 — “任意绝对路径”归一化只覆盖盘符无空格路径及少数 Unix 根；`/workspace/...`、`/builds/...`、UNC、含空格路径会残留，同一错误换工作目录后 exact_fp 不同（已用 `/workspace/a` vs `/builds/b` 复现） — 补通用 Windows/UNC/POSIX 绝对路径规则，并对 `runtime` 做 `strip().lower()`；新增 `test_normalizes_workspace_unc_and_space_paths`、`test_runtime_is_case_insensitive`
++- [严重度 P1] scripts/client.py:119 — 非 UTF-8、坏 JSON、缺字段/错误类型均直接抛 traceback；非 UTF-8 反例退出 1 且暴露 `UnicodeDecodeError`，没有稳定 JSON 错误契约 — 捕获 decode/JSON/schema 错误，向 Host 返回脱敏结构化错误并退出 1；新增 `test_non_utf8_request_returns_structured_error`、`test_malformed_request_schema`
++- [严重度 P1] scripts/client.py:96 — DB 损坏时 `status` 直接抛 `sqlite3.DatabaseError: file is not a database`；无诊断、备份或恢复提示 — 捕获 `DatabaseError`，返回结构化错误并建议/执行可恢复的损坏库改名重建流程；新增 `test_corrupt_db_returns_structured_error`
++- [严重度 P1] scripts/install-env.ps1:9 — `.deps-installed` 只看存在，不绑定 `requirements.txt` 内容；依赖升级后永远跳过，且 line 13 用系统 `python` 建 venv，忽略 `info.json.python_version=3.11` — marker 存 requirements hash + Python 版本，变化即重装，并用指定版本的 `uv/python` 创建环境
++- [严重度 P1] requirements.txt:2 — OpenVINO/ModelScope 只设下限，无法复现已验证组合，和官方“critical versions pin”要求冲突 — 固定已实测版本或安全的窄区间，并让上条 marker 对版本变化失效
++- [严重度 P1] scripts/client.py:112 — `model_ready` 硬编码只查 `.bin/.xml`，忽略 `info.json.required_files` 里的 `config.json`、tokenizer，也与 downloader 的配置源重复 — 从 `info.json` 唯一读取 model dir/required_files 并逐项非空校验；新增 `test_status_uses_info_required_files`
++- [严重度 P1] SKILL.md:3 — frontmatter description 实测约 1136 字符，超过官方 1024 上限，可能影响发布校验/路由；line 28 还把 `verified` 描述成顶层字段，而实际位于 `resolution.verified` — 压缩 supported inputs 段到正文，frontmatter 保留双语触发词与 prefer 规则；同步真实返回 schema；新增 `test_skill_frontmatter_contract`
++- [严重度 P1] meta.json:3 — 元数据仍报 `0.1.0`，与 client/HEAD 的 `0.2.0` 不一致；同时不符合 file-reference 示例字段（缺 `name/display_description/detail_describe/icon`，用了 `description`） — 同步版本并按发布端 schema 补齐/改名；新增 `test_metadata_schema_and_version`
++- [严重度 P2] scripts/client.py:151 — family 查询 `LIMIT 3` 后用 `len(rows)` 当 `family_size`，超过 3 个变体时永远误报 3 — 另做 `COUNT(*)`，列表仍保留 top 3；新增 `test_family_size_reports_full_count`
++- [严重度 P2] tests/test_unit.py:11 — 当前 12 项只覆盖 happy path，未固化并发写、DB 损坏、非 UTF-8、空/超长输入、resume/metadata 契约这些工单明确要求的边界 — 补 `test_concurrent_propose_same_fingerprint`、`test_corrupt_db_returns_structured_error`、`test_non_utf8_request_returns_structured_error`、`test_rejects_empty_error_text`、`test_rejects_oversized_error_text`、`test_continue_resume_contract`、`test_metadata_schema_and_version`
+
+hook: PostToolUse
+hook: PostToolUse Completed
+diff --git a/docs/collab/CODEX_CHANNEL.md b/docs/collab/CODEX_CHANNEL.md
+index 2df1633684ee87da893f57ffdef286a1c485f82b..5fcd558aaf9006bbe2b25242242c63c0b67d3c71
+--- a/docs/collab/CODEX_CHANNEL.md
++++ b/docs/collab/CODEX_CHANNEL.md
+@@ -31,3 +31,24 @@
+ - 库里已有 2 条真实数据（ERR_REQUIRE_ESM、PS1 无 BOM）
+ - Qwen3-4B INT4 @ OpenVINO CPU 实测：load 6.4s / 一次结构化抽取 17.5s / JSON 合法 → 所以归因器**必须不在 lookup 热路径上**，这是设计前提，审的时候按这个前提看
+ - 宿主 Qoder CLI v1.1.29 已实测能自动触发本 Skill（证据在 docs/evidence/）
++
++### [Codex] → 问题（审查基线：HEAD `5a13266` / v0.2.0）
++
++结论：**暂不通过**。两条指定测试在 `git archive HEAD` 的干净快照中均返回 0（`python tests/test_unit.py`：12/12；`powershell -File tests/test.ps1`：ALL PASS），但独立审查确认 5 个 P0，其中 4 个有运行时反例、1 个是官方入口静态契约违规。FTS5 的 `MATCH ?` 参数化 + token 白名单未发现注入/语法炸点；32 个进程并发 propose 同一指纹本次未复现失败；family 命中确实封顶“需谨慎”。
++
++- [严重度 P0] scripts/client.py:188 — `pitfalls.norm_tail` 和 `pitfall_fts.semantic_text` 在 `redact()` 前写库，注释“everything stored is redacted”不成立；用合成 `authorization=<secret>` 反例可在 `norm_tail` 读到明文，verified 后 `digest` 还会把它原样回给 Host — 先对 error text 做脱敏再 `extract/INSERT`，`digest` 输出再兜底 `redact`，并迁移/清洗既有行；新增 `test_redacts_pitfall_norm_tail_fts_and_digest`
++- [严重度 P0] scripts/redact.py:27 — 规则只处理 IPv4，公共 IPv6（反例 `2001:4860:4860::8888`）完全不变，与“public IPs are masked”承诺冲突 — 用 `ipaddress` 做 token 级 IPv4/IPv6 判定并保留私网/回环；新增 `test_redacts_public_ipv6`
++- [严重度 P0] scripts/client.py:135 — `error_text` 不校验；空字符串能 propose→commit，之后空字符串会 exact/“可引用”命中，形成无语义的错误高置信命中 — lookup/propose 入口拒绝缺失、非字符串、trim 后为空及超限输入；新增 `test_rejects_empty_error_text`、`test_rejects_oversized_error_text`
++- [严重度 P0] scripts/run.ps1:23 — 文档承诺的 `scripts\run.ps1 --continue` 实际被直接转发给要求子命令的 argparse，HEAD 反例立即报“required: cmd”；首次调用也没有任何路径调用 `download_model.py`，且下载中退出码实现为 2 而规范要求 3 — 在入口显式实现 pending request/`--continue`，首次缺模型时启动下载，下载未完 `exit 3`，并加 `test_continue_resume_contract`
++- [严重度 P0] scripts/run.ps1:1 — 官方入口契约要求第一行就是 `$ErrorActionPreference = 'Stop'` 且 Python 前做 platform/hardware gate；当前第一行是注释、gate 被明确跳过 — 把 Stop 语句移到第一行；按宿主约定实现检测，若确实支持任意 CPU，也要用可执行检查明确“不支持”的出口而不是空 gate
++- [严重度 P1] scripts/download_model.py:31 — 下载结果直接删掉 final 目录再 `copytree` 到 final，未使用 `.partial` + 校验后原子改名；中断会丢掉原有好模型并留下“半成品 final” — 复制到同盘 `.partial`，校验 `required_files` 后 `os.replace`/目录交换，失败保留旧 final；新增 `test_download_is_atomic`
++- [严重度 P1] scripts/client.py:49 — “任意绝对路径”归一化只覆盖盘符无空格路径及少数 Unix 根；`/workspace/...`、`/builds/...`、UNC、含空格路径会残留，同一错误换工作目录后 exact_fp 不同（已用 `/workspace/a` vs `/builds/b` 复现） — 补通用 Windows/UNC/POSIX 绝对路径规则，并对 `runtime` 做 `strip().lower()`；新增 `test_normalizes_workspace_unc_and_space_paths`、`test_runtime_is_case_insensitive`
++- [严重度 P1] scripts/client.py:119 — 非 UTF-8、坏 JSON、缺字段/错误类型均直接抛 traceback；非 UTF-8 反例退出 1 且暴露 `UnicodeDecodeError`，没有稳定 JSON 错误契约 — 捕获 decode/JSON/schema 错误，向 Host 返回脱敏结构化错误并退出 1；新增 `test_non_utf8_request_returns_structured_error`、`test_malformed_request_schema`
++- [严重度 P1] scripts/client.py:96 — DB 损坏时 `status` 直接抛 `sqlite3.DatabaseError: file is not a database`；无诊断、备份或恢复提示 — 捕获 `DatabaseError`，返回结构化错误并建议/执行可恢复的损坏库改名重建流程；新增 `test_corrupt_db_returns_structured_error`
++- [严重度 P1] scripts/install-env.ps1:9 — `.deps-installed` 只看存在，不绑定 `requirements.txt` 内容；依赖升级后永远跳过，且 line 13 用系统 `python` 建 venv，忽略 `info.json.python_version=3.11` — marker 存 requirements hash + Python 版本，变化即重装，并用指定版本的 `uv/python` 创建环境
++- [严重度 P1] requirements.txt:2 — OpenVINO/ModelScope 只设下限，无法复现已验证组合，和官方“critical versions pin”要求冲突 — 固定已实测版本或安全的窄区间，并让上条 marker 对版本变化失效
++- [严重度 P1] scripts/client.py:112 — `model_ready` 硬编码只查 `.bin/.xml`，忽略 `info.json.required_files` 里的 `config.json`、tokenizer，也与 downloader 的配置源重复 — 从 `info.json` 唯一读取 model dir/required_files 并逐项非空校验；新增 `test_status_uses_info_required_files`
++- [严重度 P1] SKILL.md:3 — frontmatter description 实测约 1136 字符，超过官方 1024 上限，可能影响发布校验/路由；line 28 还把 `verified` 描述成顶层字段，而实际位于 `resolution.verified` — 压缩 supported inputs 段到正文，frontmatter 保留双语触发词与 prefer 规则；同步真实返回 schema；新增 `test_skill_frontmatter_contract`
++- [严重度 P1] meta.json:3 — 元数据仍报 `0.1.0`，与 client/HEAD 的 `0.2.0` 不一致；同时不符合 file-reference 示例字段（缺 `name/display_description/detail_describe/icon`，用了 `description`） — 同步版本并按发布端 schema 补齐/改名；新增 `test_metadata_schema_and_version`
++- [严重度 P2] scripts/client.py:151 — family 查询 `LIMIT 3` 后用 `len(rows)` 当 `family_size`，超过 3 个变体时永远误报 3 — 另做 `COUNT(*)`，列表仍保留 top 3；新增 `test_family_size_reports_full_count`
++- [严重度 P2] tests/test_unit.py:11 — 当前 12 项只覆盖 happy path，未固化并发写、DB 损坏、非 UTF-8、空/超长输入、resume/metadata 契约这些工单明确要求的边界 — 补 `test_concurrent_propose_same_fingerprint`、`test_corrupt_db_returns_structured_error`、`test_non_utf8_request_returns_structured_error`、`test_rejects_empty_error_text`、`test_rejects_oversized_error_text`、`test_continue_resume_contract`、`test_metadata_schema_and_version`
+
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path 'docs\\collab\\CODEX_CHANNEL.md' -Pattern '\\[Codex\\]' -Context 0,2" in C:\Users\miku\local-pitfall-memory
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short' in C:\Users\miku\local-pitfall-memory
+hook: PreToolUse Completed
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --check -- docs/collab/CODEX_CHANNEL.md' in C:\Users\miku\local-pitfall-memory
+ succeeded in 2365ms:
+
+> docs\collab\CODEX_CHANNEL.md:3:规则同 Sensei：编号工单，谁写谁署名（[CC] / [Codex]），追加不删改。做完在原条目下写"→ 完成/阻塞/问题"。
+  docs\collab\CODEX_CHANNEL.md:4:项目背景先读：`C:\Users\miku\Desktop\魔搭项目进度.md`（权威进度）和 `C:\Users\miku\sensei\docs\MODELSCOPE-
+SKILL-PLAN.md` 第 6 节（终版方案）。
+  docs\collab\CODEX_CHANNEL.md:5:
+> docs\collab\CODEX_CHANNEL.md:25:- 写回本条目下，署名 [Codex]，格式：`[严重度 P0/P1/P2] 文件:行 — 问题 — 建议改法`
+  docs\collab\CODEX_CHANNEL.md:26:- P0 = 会导致错误命中/漏脱敏/入口契约违规；P1 = 明显缺陷；P2 = 打磨
+  docs\collab\CODEX_CHANNEL.md:27:- **不要直接改代码**，只审只写。CC 看完回执后决定采纳哪些
+> docs\collab\CODEX_CHANNEL.md:35:### [Codex] → 问题（审查基线：HEAD `5a13266` / v0.2.0）
+  docs\collab\CODEX_CHANNEL.md:36:
+  docs\collab\CODEX_CHANNEL.md:37:结论：**暂不通过**。两条指定测试在 `git archive HEAD` 的干净快照中均返回 0（`python tests/test_unit.py`：12/12；
+`powershell -File tests/test.ps1`：ALL PASS），但独立审查确认 5 个 P0，其中 4 个有运行时反例、1 个是官方入口静态契约违规。FTS5 的 `MATCH ?` 参数化 + token 白名单
+未发现注入/语法炸点；32 个进程并发 propose 同一指纹本次未复现失败；family 命中确实封顶“需谨慎”。
+
+
+
+hook: PostToolUse
+ succeeded in 2443ms:
+warning: in the working copy of 'docs/collab/CODEX_CHANNEL.md', LF will be replaced by CRLF the next time Git touches it
+
+hook: PostToolUse
+ succeeded in 2516ms:
+ M docs/collab/CODEX_CHANNEL.md
+ M docs/collab/codex-run-1.log
+warning: unable to access 'C:\Users\miku/.config/git/ignore': Permission denied
+warning: unable to access 'C:\Users\miku/.config/git/ignore': Permission denied
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+diff --git a/docs/collab/CODEX_CHANNEL.md b/docs/collab/CODEX_CHANNEL.md
+index 2df1633684ee87da893f57ffdef286a1c485f82b..5fcd558aaf9006bbe2b25242242c63c0b67d3c71
+--- a/docs/collab/CODEX_CHANNEL.md
++++ b/docs/collab/CODEX_CHANNEL.md
+@@ -31,3 +31,24 @@
+ - 库里已有 2 条真实数据（ERR_REQUIRE_ESM、PS1 无 BOM）
+ - Qwen3-4B INT4 @ OpenVINO CPU 实测：load 6.4s / 一次结构化抽取 17.5s / JSON 合法 → 所以归因器**必须不在 lookup 热路径上**，这是设计前提，审的时候按这个前提看
+ - 宿主 Qoder CLI v1.1.29 已实测能自动触发本 Skill（证据在 docs/evidence/）
++
++### [Codex] → 问题（审查基线：HEAD `5a13266` / v0.2.0）
++
++结论：**暂不通过**。两条指定测试在 `git archive HEAD` 的干净快照中均返回 0（`python tests/test_unit.py`：12/12；`powershell -File tests/test.ps1`：ALL PASS），但独立审查确认 5 个 P0，其中 4 个有运行时反例、1 个是官方入口静态契约违规。FTS5 的 `MATCH ?` 参数化 + token 白名单未发现注入/语法炸点；32 个进程并发 propose 同一指纹本次未复现失败；family 命中确实封顶“需谨慎”。
++
++- [严重度 P0] scripts/client.py:188 — `pitfalls.norm_tail` 和 `pitfall_fts.semantic_text` 在 `redact()` 前写库，注释“everything stored is redacted”不成立；用合成 `authorization=<secret>` 反例可在 `norm_tail` 读到明文，verified 后 `digest` 还会把它原样回给 Host — 先对 error text 做脱敏再 `extract/INSERT`，`digest` 输出再兜底 `redact`，并迁移/清洗既有行；新增 `test_redacts_pitfall_norm_tail_fts_and_digest`
++- [严重度 P0] scripts/redact.py:27 — 规则只处理 IPv4，公共 IPv6（反例 `2001:4860:4860::8888`）完全不变，与“public IPs are masked”承诺冲突 — 用 `ipaddress` 做 token 级 IPv4/IPv6 判定并保留私网/回环；新增 `test_redacts_public_ipv6`
++- [严重度 P0] scripts/client.py:135 — `error_text` 不校验；空字符串能 propose→commit，之后空字符串会 exact/“可引用”命中，形成无语义的错误高置信命中 — lookup/propose 入口拒绝缺失、非字符串、trim 后为空及超限输入；新增 `test_rejects_empty_error_text`、`test_rejects_oversized_error_text`
++- [严重度 P0] scripts/run.ps1:23 — 文档承诺的 `scripts\run.ps1 --continue` 实际被直接转发给要求子命令的 argparse，HEAD 反例立即报“required: cmd”；首次调用也没有任何路径调用 `download_model.py`，且下载中退出码实现为 2 而规范要求 3 — 在入口显式实现 pending request/`--continue`，首次缺模型时启动下载，下载未完 `exit 3`，并加 `test_continue_resume_contract`
++- [严重度 P0] scripts/run.ps1:1 — 官方入口契约要求第一行就是 `$ErrorActionPreference = 'Stop'` 且 Python 前做 platform/hardware gate；当前第一行是注释、gate 被明确跳过 — 把 Stop 语句移到第一行；按宿主约定实现检测，若确实支持任意 CPU，也要用可执行检查明确“不支持”的出口而不是空 gate
++- [严重度 P1] scripts/download_model.py:31 — 下载结果直接删掉 final 目录再 `copytree` 到 final，未使用 `.partial` + 校验后原子改名；中断会丢掉原有好模型并留下“半成品 final” — 复制到同盘 `.partial`，校验 `required_files` 后 `os.replace`/目录交换，失败保留旧 final；新增 `test_download_is_atomic`
++- [严重度 P1] scripts/client.py:49 — “任意绝对路径”归一化只覆盖盘符无空格路径及少数 Unix 根；`/workspace/...`、`/builds/...`、UNC、含空格路径会残留，同一错误换工作目录后 exact_fp 不同（已用 `/workspace/a` vs `/builds/b` 复现） — 补通用 Windows/UNC/POSIX 绝对路径规则，并对 `runtime` 做 `strip().lower()`；新增 `test_normalizes_workspace_unc_and_space_paths`、`test_runtime_is_case_insensitive`
++- [严重度 P1] scripts/client.py:119 — 非 UTF-8、坏 JSON、缺字段/错误类型均直接抛 traceback；非 UTF-8 反例退出 1 且暴露 `UnicodeDecodeError`，没有稳定 JSON 错误契约 — 捕获 decode/JSON/schema 错误，向 Host 返回脱敏结构化错误并退出 1；新增 `test_non_utf8_request_returns_structured_error`、`test_malformed_request_schema`
++- [严重度 P1] scripts/client.py:96 — DB 损坏时 `status` 直接抛 `sqlite3.DatabaseError: file is not a database`；无诊断、备份或恢复提示 — 捕获 `DatabaseError`，返回结构化错误并建议/执行可恢复的损坏库改名重建流程；新增 `test_corrupt_db_returns_structured_error`
++- [严重度 P1] scripts/install-env.ps1:9 — `.deps-installed` 只看存在，不绑定 `requirements.txt` 内容；依赖升级后永远跳过，且 line 13 用系统 `python` 建 venv，忽略 `info.json.python_version=3.11` — marker 存 requirements hash + Python 版本，变化即重装，并用指定版本的 `uv/python` 创建环境
++- [严重度 P1] requirements.txt:2 — OpenVINO/ModelScope 只设下限，无法复现已验证组合，和官方“critical versions pin”要求冲突 — 固定已实测版本或安全的窄区间，并让上条 marker 对版本变化失效
++- [严重度 P1] scripts/client.py:112 — `model_ready` 硬编码只查 `.bin/.xml`，忽略 `info.json.required_files` 里的 `config.json`、tokenizer，也与 downloader 的配置源重复 — 从 `info.json` 唯一读取 model dir/required_files 并逐项非空校验；新增 `test_status_uses_info_required_files`
++- [严重度 P1] SKILL.md:3 — frontmatter description 实测约 1136 字符，超过官方 1024 上限，可能影响发布校验/路由；line 28 还把 `verified` 描述成顶层字段，而实际位于 `resolution.verified` — 压缩 supported inputs 段到正文，frontmatter 保留双语触发词与 prefer 规则；同步真实返回 schema；新增 `test_skill_frontmatter_contract`
++- [严重度 P1] meta.json:3 — 元数据仍报 `0.1.0`，与 client/HEAD 的 `0.2.0` 不一致；同时不符合 file-reference 示例字段（缺 `name/display_description/detail_describe/icon`，用了 `description`） — 同步版本并按发布端 schema 补齐/改名；新增 `test_metadata_schema_and_version`
++- [严重度 P2] scripts/client.py:151 — family 查询 `LIMIT 3` 后用 `len(rows)` 当 `family_size`，超过 3 个变体时永远误报 3 — 另做 `COUNT(*)`，列表仍保留 top 3；新增 `test_family_size_reports_full_count`
++- [严重度 P2] tests/test_unit.py:11 — 当前 12 项只覆盖 happy path，未固化并发写、DB 损坏、非 UTF-8、空/超长输入、resume/metadata 契约这些工单明确要求的边界 — 补 `test_concurrent_propose_same_fingerprint`、`test_corrupt_db_returns_structured_error`、`test_non_utf8_request_returns_structured_error`、`test_rejects_empty_error_text`、`test_rejects_oversized_error_text`、`test_continue_resume_contract`、`test_metadata_schema_and_version`
+
+2026-08-25T14:41:35.880266Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 94 column 5
+codex
+已完成并追加到 [docs/collab/CODEX_CHANNEL.md](C:/Users/miku/local-pitfall-memory/docs/collab/CODEX_CHANNEL.md:35)，署名 `[Codex]`。
+
+- 审查基线：`5a13266` / v0.2.0
+- 测试：12/12、E2E ALL PASS
+- 结论：暂不通过，5 个 P0、9 个 P1、2 个 P2
+- 未修改任何源码或测试文件
+- 审查期间 HEAD 被并行推进到 `390b58d` / v0.3.0；本次结论仍严格针对 v0.2.0。
+diff --git a/docs/collab/CODEX_CHANNEL.md b/docs/collab/CODEX_CHANNEL.md
+index 2df1633684ee87da893f57ffdef286a1c485f82b..5fcd558aaf9006bbe2b25242242c63c0b67d3c71
+--- a/docs/collab/CODEX_CHANNEL.md
++++ b/docs/collab/CODEX_CHANNEL.md
+@@ -31,3 +31,24 @@
+ - 库里已有 2 条真实数据（ERR_REQUIRE_ESM、PS1 无 BOM）
+ - Qwen3-4B INT4 @ OpenVINO CPU 实测：load 6.4s / 一次结构化抽取 17.5s / JSON 合法 → 所以归因器**必须不在 lookup 热路径上**，这是设计前提，审的时候按这个前提看
+ - 宿主 Qoder CLI v1.1.29 已实测能自动触发本 Skill（证据在 docs/evidence/）
++
++### [Codex] → 问题（审查基线：HEAD `5a13266` / v0.2.0）
++
++结论：**暂不通过**。两条指定测试在 `git archive HEAD` 的干净快照中均返回 0（`python tests/test_unit.py`：12/12；`powershell -File tests/test.ps1`：ALL PASS），但独立审查确认 5 个 P0，其中 4 个有运行时反例、1 个是官方入口静态契约违规。FTS5 的 `MATCH ?` 参数化 + token 白名单未发现注入/语法炸点；32 个进程并发 propose 同一指纹本次未复现失败；family 命中确实封顶“需谨慎”。
++
++- [严重度 P0] scripts/client.py:188 — `pitfalls.norm_tail` 和 `pitfall_fts.semantic_text` 在 `redact()` 前写库，注释“everything stored is redacted”不成立；用合成 `authorization=<secret>` 反例可在 `norm_tail` 读到明文，verified 后 `digest` 还会把它原样回给 Host — 先对 error text 做脱敏再 `extract/INSERT`，`digest` 输出再兜底 `redact`，并迁移/清洗既有行；新增 `test_redacts_pitfall_norm_tail_fts_and_digest`
++- [严重度 P0] scripts/redact.py:27 — 规则只处理 IPv4，公共 IPv6（反例 `2001:4860:4860::8888`）完全不变，与“public IPs are masked”承诺冲突 — 用 `ipaddress` 做 token 级 IPv4/IPv6 判定并保留私网/回环；新增 `test_redacts_public_ipv6`
++- [严重度 P0] scripts/client.py:135 — `error_text` 不校验；空字符串能 propose→commit，之后空字符串会 exact/“可引用”命中，形成无语义的错误高置信命中 — lookup/propose 入口拒绝缺失、非字符串、trim 后为空及超限输入；新增 `test_rejects_empty_error_text`、`test_rejects_oversized_error_text`
++- [严重度 P0] scripts/run.ps1:23 — 文档承诺的 `scripts\run.ps1 --continue` 实际被直接转发给要求子命令的 argparse，HEAD 反例立即报“required: cmd”；首次调用也没有任何路径调用 `download_model.py`，且下载中退出码实现为 2 而规范要求 3 — 在入口显式实现 pending request/`--continue`，首次缺模型时启动下载，下载未完 `exit 3`，并加 `test_continue_resume_contract`
++- [严重度 P0] scripts/run.ps1:1 — 官方入口契约要求第一行就是 `$ErrorActionPreference = 'Stop'` 且 Python 前做 platform/hardware gate；当前第一行是注释、gate 被明确跳过 — 把 Stop 语句移到第一行；按宿主约定实现检测，若确实支持任意 CPU，也要用可执行检查明确“不支持”的出口而不是空 gate
++- [严重度 P1] scripts/download_model.py:31 — 下载结果直接删掉 final 目录再 `copytree` 到 final，未使用 `.partial` + 校验后原子改名；中断会丢掉原有好模型并留下“半成品 final” — 复制到同盘 `.partial`，校验 `required_files` 后 `os.replace`/目录交换，失败保留旧 final；新增 `test_download_is_atomic`
++- [严重度 P1] scripts/client.py:49 — “任意绝对路径”归一化只覆盖盘符无空格路径及少数 Unix 根；`/workspace/...`、`/builds/...`、UNC、含空格路径会残留，同一错误换工作目录后 exact_fp 不同（已用 `/workspace/a` vs `/builds/b` 复现） — 补通用 Windows/UNC/POSIX 绝对路径规则，并对 `runtime` 做 `strip().lower()`；新增 `test_normalizes_workspace_unc_and_space_paths`、`test_runtime_is_case_insensitive`
++- [严重度 P1] scripts/client.py:119 — 非 UTF-8、坏 JSON、缺字段/错误类型均直接抛 traceback；非 UTF-8 反例退出 1 且暴露 `UnicodeDecodeError`，没有稳定 JSON 错误契约 — 捕获 decode/JSON/schema 错误，向 Host 返回脱敏结构化错误并退出 1；新增 `test_non_utf8_request_returns_structured_error`、`test_malformed_request_schema`
++- [严重度 P1] scripts/client.py:96 — DB 损坏时 `status` 直接抛 `sqlite3.DatabaseError: file is not a database`；无诊断、备份或恢复提示 — 捕获 `DatabaseError`，返回结构化错误并建议/执行可恢复的损坏库改名重建流程；新增 `test_corrupt_db_returns_structured_error`
++- [严重度 P1] scripts/install-env.ps1:9 — `.deps-installed` 只看存在，不绑定 `requirements.txt` 内容；依赖升级后永远跳过，且 line 13 用系统 `python` 建 venv，忽略 `info.json.python_version=3.11` — marker 存 requirements hash + Python 版本，变化即重装，并用指定版本的 `uv/python` 创建环境
++- [严重度 P1] requirements.txt:2 — OpenVINO/ModelScope 只设下限，无法复现已验证组合，和官方“critical versions pin”要求冲突 — 固定已实测版本或安全的窄区间，并让上条 marker 对版本变化失效
++- [严重度 P1] scripts/client.py:112 — `model_ready` 硬编码只查 `.bin/.xml`，忽略 `info.json.required_files` 里的 `config.json`、tokenizer，也与 downloader 的配置源重复 — 从 `info.json` 唯一读取 model dir/required_files 并逐项非空校验；新增 `test_status_uses_info_required_files`
++- [严重度 P1] SKILL.md:3 — frontmatter description 实测约 1136 字符，超过官方 1024 上限，可能影响发布校验/路由；line 28 还把 `verified` 描述成顶层字段，而实际位于 `resolution.verified` — 压缩 supported inputs 段到正文，frontmatter 保留双语触发词与 prefer 规则；同步真实返回 schema；新增 `test_skill_frontmatter_contract`
++- [严重度 P1] meta.json:3 — 元数据仍报 `0.1.0`，与 client/HEAD 的 `0.2.0` 不一致；同时不符合 file-reference 示例字段（缺 `name/display_description/detail_describe/icon`，用了 `description`） — 同步版本并按发布端 schema 补齐/改名；新增 `test_metadata_schema_and_version`
++- [严重度 P2] scripts/client.py:151 — family 查询 `LIMIT 3` 后用 `len(rows)` 当 `family_size`，超过 3 个变体时永远误报 3 — 另做 `COUNT(*)`，列表仍保留 top 3；新增 `test_family_size_reports_full_count`
++- [严重度 P2] tests/test_unit.py:11 — 当前 12 项只覆盖 happy path，未固化并发写、DB 损坏、非 UTF-8、空/超长输入、resume/metadata 契约这些工单明确要求的边界 — 补 `test_concurrent_propose_same_fingerprint`、`test_corrupt_db_returns_structured_error`、`test_non_utf8_request_returns_structured_error`、`test_rejects_empty_error_text`、`test_rejects_oversized_error_text`、`test_continue_resume_contract`、`test_metadata_schema_and_version`
+
+hook: Stop
+hook: Stop Completed
+tokens used
+248,276
+已完成并追加到 [docs/collab/CODEX_CHANNEL.md](C:/Users/miku/local-pitfall-memory/docs/collab/CODEX_CHANNEL.md:35)，署名 `[Codex]`。
+
+- 审查基线：`5a13266` / v0.2.0
+- 测试：12/12、E2E ALL PASS
+- 结论：暂不通过，5 个 P0、9 个 P1、2 个 P2
+- 未修改任何源码或测试文件
+- 审查期间 HEAD 被并行推进到 `390b58d` / v0.3.0；本次结论仍严格针对 v0.2.0。

@@ -1,79 +1,73 @@
 ---
 name: local-pitfall-memory
 description: |
-  Local pitfall memory for build/runtime errors: before guessing a fix, look up whether THIS machine has seen and VERIFIED a fix for the same error before; after a fix is verified, commit it into the local knowledge base (本地踩坑记忆库：报错先查本机历史，修复验证后沉淀入库，历史与检索永不出机). Use this skill when the user or the agent, in Chinese or English, hits a terminal/build/runtime error and asks 这个报错见过吗/以前怎么修的/查一下踩坑库/记录这次修复/生成踩坑文档, or "have we seen this error", "look up pitfall", "log this fix", "digest pitfalls". Trigger on Chinese verbs like 查坑/记坑/沉淀/归因/踩坑 and English verbs like lookup/log/commit/digest pitfall, and explicit mentions of 报错/exception/traceback/error/stderr/本地/离线/offline/AIPC.
-
-  Supported inputs/categories:
-  - Raw error text: compiler errors, stack traces, npm/pip/cargo failures, HTTP errors, exit codes
-  - Fix records: the command or change that fixed an error, plus how it was verified
-  - Digest requests: compile the local database into a Markdown pitfalls table
-
-  Prefer this skill over re-deriving a fix from scratch whenever the error may have occurred on this machine before — a verified historical fix beats a fresh guess.
+  Local pitfall memory for build/runtime errors: before guessing a fix, look up whether THIS machine has a VERIFIED fix for the same error; after a fix is verified, commit it to the local knowledge base (本地踩坑记忆库：报错先查本机已验证修复，验证后沉淀入库，历史与检索不出机). Use when the user or agent, in Chinese or English, hits a terminal/build/runtime error and asks 这个报错见过吗/以前怎么修的/查踩坑库/记录这次修复/生成踩坑文档, or "have we seen this error", "look up pitfall", "log this fix", "digest pitfalls". Trigger on 查坑/记坑/沉淀/归因/踩坑 and lookup/log/commit/digest pitfall, plus 报错/exception/traceback/stderr/本地/离线/offline/AIPC. Prefer this skill over re-deriving a fix from scratch whenever the error may have occurred on this machine before.
 ---
 
 # Local Pitfall Memory Skill Guide
 
 给 Agent 装一块长在本机、只记住已验证修复的踩坑记忆：历史库与检索不出机，同一个坑不再从头猜。
 
+Supported inputs: raw error text (compiler errors, stack traces, npm/pip/cargo failures, HTTP errors, exit codes);
+fix records (the command/change that fixed it + how it was verified); digest requests.
+
 ## Usage
 
-### Look up an error (查坑)
+`scripts\run.ps1` is the only supported interface.
 
-```
-scripts\run.ps1 lookup --request-file request.json --json
-```
+| Intent | Command |
+| --- | --- |
+| 查坑（this error seen before?） | `scripts\run.ps1 lookup --request-file request.json --json` |
+| 查坑 + 让本地模型归因（慢） | `scripts\run.ps1 lookup --request-file request.json --json --attribute` |
+| 预沉淀（fix proposed, not yet verified） | `scripts\run.ps1 propose --request-file fix.json --json` |
+| 验证通过后入库 | `scripts\run.ps1 commit --id <proposal-id> --verify-exit-code 0 --json` |
+| 汇编踩坑文档 | `scripts\run.ps1 digest --out pitfalls.md` |
+| 健康检查 | `scripts\run.ps1 status --json` |
+| 归因引擎 | `scripts\run.ps1 server status|start|stop --json` |
+| 续传模型下载 | `scripts\run.ps1 --continue` |
 
 `request.json`: `{"error_text": "<full error output>", "context": {"cwd": "...", "runtime": "node|python|..."}}`
+`fix.json`: same plus `"root_cause"`, `"fix_command"`, `"verify_method"`.
+Multi-line error text MUST go through `--request-file`, never inline shell quotes.
 
-Returns a match card: `{"hit": "exact|family|semantic|none", "confidence": "可引用|需谨慎|仅联想", "resolution": {...}, "verified": true}`.
-
-### Propose a fix record (预沉淀，未验证)
-
-```
-scripts\run.ps1 propose --request-file fix.json --json
-```
-
-### Commit after verification (验证通过才入库高置信档)
+## Interpreting the reply
 
 ```
-scripts\run.ps1 commit --id <proposal-id> --verify-exit-code 0 --json
+{"hit": "exact|family|semantic|none", "confidence": "可引用|需谨慎|仅联想|null",
+ "pitfall_id": 12, "times_seen": 3, "last_seen": 1787500000,
+ "resolution": {"root_cause": "...", "fix_command": "...", "verify_method": "...", "verified": true},
+ "family_size": 2, "known_variants": ["..."],          // family hits only
+ "attribution": {"error_class": "...", "package": "...", "root_cause_guess": "...", "fix_hint": "..."}  // only with --attribute / first propose
+}
 ```
 
-### Digest the knowledge base (汇编踩坑文档)
+- 命中层级 `hit`: exact（指纹全同）/ family（同类错误，细节不同）/ semantic（语义相近）/ none
+- 置信 `confidence`: **可引用** = exact 且 `resolution.verified=true`；**需谨慎** = exact 未验证或 family；**仅联想** = semantic
+- Only 可引用 results may be applied without re-verification. `resolution.verified` is inside `resolution`, not top-level.
+- `attribution.pending=true` means the local model is still downloading — run `scripts\run.ps1 --continue`.
 
-```
-scripts\run.ps1 digest --out pitfalls.md
-```
+## Failure handling
 
-### Health check
+- Errors are structured JSON on stdout with exit code 1: `{"ok": false, "error": "<code>", "message": "..."}`
+  codes: `request_not_utf8`, `request_bad_json`, `request_schema`, `request_empty`, `request_too_large`, `db_corrupt`, `db_error`
+- A corrupt database is moved aside (never deleted) and a fresh one is created on the next call.
+- Exit code 3 = model download pending; rerun `scripts\run.ps1 --continue`.
 
-```
-scripts\run.ps1 status --json
-scripts\run.ps1 server status|start|stop --json     # resident attribution engine (Qwen3-4B INT4 @ OpenVINO)
-```
+## Local model policy
 
-### Local model policy (read before relying on timings)
+- Fingerprint lookup is deterministic and fast (< 1 s). The model is **never** on that path.
+- The model runs only on the first record of a new pit in `propose` (~15–25 s on CPU; skip with `--no-model`) and on fuzzy results with `lookup --attribute`. Any model failure/timeout is soft.
+- The engine stays resident and exits after `server_alive_timeout` seconds idle (info.json).
 
-- Fingerprint lookup is deterministic and fast (< 1s). The local model is **never** on that path.
-- The model runs only (a) once on the **first record** of a new pit in `propose` (~15–25s on CPU; skip with `--no-model`),
-  and (b) on fuzzy results (`semantic`/`none`) when you pass `lookup --attribute`.
-- Any model failure or timeout is soft: the reply simply lacks the `attribution` field.
-- The engine stays resident and exits by itself after `server_alive_timeout` seconds idle (info.json).
+## Important
 
-Important:
-- `scripts\run.ps1` is the only supported interface — do not call other scripts directly.
-- Multi-line error text MUST go through `--request-file`, never inline shell quotes.
-- First call downloads the local model; if it times out, run `scripts\run.ps1 --continue` to resume.
-- Never fall back to a cloud service; the database and all retrieval stay on this machine.
-- Only `commit`-ed (verified) resolutions can be returned as 可引用; un-verified proposals surface as 需谨慎 at best.
-
-### Interpreting the reply
-
-- 命中层级: exact（指纹全同）/ family（同类错误）/ semantic（语义相近）/ none
-- 置信标签: 可引用（已验证+环境兼容）/ 需谨慎（未验证或环境有差）/ 仅联想（仅语义相似）
-- 修复卡: 根因 / 修复命令 / 验证方式 / 上次命中时间与次数
+- Do not call other scripts directly; `scripts\run.ps1` is the interface.
+- First call downloads the model (~2.3 GB); if it times out, run `scripts\run.ps1 --continue`.
+- Unsupported platform (non-x64 / < 6 GB RAM) prints an error and exits with code 1.
+- Never fall back to a cloud service; the database, index and retrieval stay on this machine.
+- Everything stored and everything returned is redacted (keys/JWT/emails/public IPs/username).
 
 ## What this skill does NOT do
 
-- It does not fix bugs itself and does not replace the agent's own reasoning — it only serves this machine's verified history.
+- It does not fix bugs itself and does not replace the agent's reasoning — it serves this machine's verified history.
 - It does not send error text, code, or history anywhere off this machine.

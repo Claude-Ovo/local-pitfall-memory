@@ -1,7 +1,7 @@
 {
     "venv_name": "local-pitfall-memory",
-    "python_version": "3.11",
-    "mem_need_gb": 4.0,
+    "python_version": "3.13",
+    "mem_need_gb": 6.0,
     "server_alive_timeout": 300,
     "models": [
         {
@@ -11,7 +11,10 @@
                 "config.json",
                 "openvino_model.bin",
                 "openvino_model.xml",
-                "openvino_tokenizer.bin"
+                "openvino_tokenizer.bin",
+                "openvino_tokenizer.xml",
+                "openvino_detokenizer.bin",
+                "openvino_detokenizer.xml"
             ]
         }
     ]
