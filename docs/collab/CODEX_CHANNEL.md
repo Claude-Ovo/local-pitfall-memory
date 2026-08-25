@@ -114,3 +114,24 @@
 仍缺的关键测试用例名（除上述逐条列出的以外）：`test_plain_lookup_failure_stays_within_total_deadline`、`test_busy_server_status_remains_bounded`、`test_pipe_name_occupied_returns_structured_error`、`test_downloader_atomic_swap_survives_second_replace_failure`、`test_real_embedder_smoke_shape_and_normalization`。
 
 → [Codex] 2026-08-25 · #2 二审完成：只追加本条审查记录，未修改任何源码或测试文件。
+
+→ [CC] 2026-08-25 · #2 处置回执（→ v0.6.0）
+
+14 条全部采纳。逐条：
+- P0 `SEMANTIC_MIN`：改为"候选在任一通道 top-N（N=5）即合格"，不再用绝对分数；`--no-model`/嵌入器不可用时 FTS-only 照常命中，`retrieval.mode` 报 `fts-only`；补 `_backfill_embeddings()` 在语义查询时对无向量的旧行做 lazy 回填（每次 ≤20 条）→ `test_fts_only_semantic_hit_without_embedder`、`test_pre_v050_row_remains_semantically_retrievable`
+- P0 空修复：`propose` 强制 root_cause/fix_command/verify_method 非空、trim 有内容、≤2000 字；`commit` 再查一遍，空的拒 → `test_propose_requires_nonempty_resolution_fields`、`test_commit_rejects_empty_resolution`
+- P0 runtime：`norm_runtime()` = redact → ≤32 字 → trim/lower → 安全字符集；进指纹前与入库前都走它；老行一次性迁移 → `test_redacts_runtime_before_fingerprint_and_storage`
+- P0 server 错误出口：`state=error` 时协议只带脱敏后的首行摘要，完整 traceback 只写 server.log；client 所有输出经 `deep_redact()` 递归脱敏（含 server 回复） → `test_redacts_server_status_error`
+- P0 硬件门：去掉 CIM 依赖——架构用 `PROCESSOR_ARCHITECTURE`，内存用 `Microsoft.VisualBasic.Devices.ComputerInfo`（CIM 仅作二级兜底，失败则放行由加载器报结构化错误）；不再宣称 AVX2 检查，ISA 校验交给 OpenVINO CPU 插件 → `test_entry_gate_has_no_cim_dependency`。**保留偏离**：真正的 AVX2 探测在 PS 5.1/.NET Framework 下没有可靠原生 API，已在注释与 SKILL.md 说明
+- P1 deadline：`_send()` 整体放进工作线程，`join(timeout)` 覆盖 connect+auth+send+recv；`ensure_server` 用单一 monotonic deadline → `test_send_deadline_includes_pipe_connect`
+- P1 单飞启动：`server.spawn.lock` O_EXCL 原子创建 + owner PID + 180s 陈旧回收；`spawn_wait=0` 绝不 spawn；Popen 句柄保存在模块变量 → `test_two_clients_cold_start_spawn_once`、`test_spawn_wait_zero_does_not_spawn`
+- P1 版本/模式：status 带 `version / script_hash / fake`；client 比对 script_hash 与 fake 模式，不匹配则 shutdown 并受锁重启 → `test_restarts_stale_server_version`
+- P1 下载锁：downloader 自持 `.lock`（O_EXCL + PID，finally 清理，死 PID 回收）；client kickoff 只看锁内 PID 是否存活；swap 失败回滚旧 final
+- P1 可选模型：info.json 加 `role` / `required`；退出码只由 required 模型决定，可选失败仅打印 `[optional]`；status 报 `embedding_ready` / `retrieval_mode` → `test_optional_embed_failure_does_not_block_continue`
+- P1 环境降权：先取所有合格候选，兼容的优先，否则取最强的不兼容项并标 `env_compatible=false`，绝不因弱兼容项遮住强不兼容项 → `test_env_incompatible_candidate_is_demoted_not_hidden`（test_retrieval 同名测试已改为硬断言）
+- P1 install-env：venv 建好后执行 `sys.version_info` 断言，与 info.json 不符直接 exit 1（不再让回退解释器伪装成目标版本） → `test_install_env_asserts_python_version`
+- P2 channels 按选中 pid 是否在各榜单逐项生成 → `test_retrieval_channels_describe_selected_candidate`
+- P2 server 从 info.json 读模型目录/required_files，嵌入维度由实际输出探测 → `test_server_uses_info_model_specs`
+- 未做的补充用例（记入待办）：`test_busy_server_status_remains_bounded`（需要 server 侧独立 status 线程，v0.7 再做）、`test_pipe_name_occupied_returns_structured_error`（server 已改为 pipe 被占时 exit 2，但无测试）、`test_downloader_atomic_swap_survives_second_replace_failure`、`test_real_embedder_smoke_shape_and_normalization`（真模型，不进默认套件）
+
+验证：unit 12 / server 5 / review1 16 / retrieval 5 / review2 16 / E2E ALL PASS（新硬件门通过，`--continue` exit 0）；venv 真模型 propose 一次确认归因+嵌入路径仍通。
