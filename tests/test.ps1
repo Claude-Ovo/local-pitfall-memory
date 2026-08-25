@@ -12,6 +12,9 @@ if ($LASTEXITCODE -ne 0) { Write-Output 'UNIT FAIL'; exit 1 }
 Write-Output '== server protocol tests (fake model)'
 python (Join-Path $PSScriptRoot 'test_server.py')
 if ($LASTEXITCODE -ne 0) { Write-Output 'SERVER FAIL'; exit 1 }
+Write-Output '== codex review #1 regression tests'
+python (Join-Path $PSScriptRoot 'test_review1.py')
+if ($LASTEXITCODE -ne 0) { Write-Output 'REVIEW1 FAIL'; exit 1 }
 Write-Output '== e2e through run.ps1'
 python (Join-Path $PSScriptRoot 'make_fixtures.py') $PSScriptRoot | Out-Null
 
@@ -30,6 +33,12 @@ $s = Step 'lookup2' { & $Run lookup --request-file (Join-Path $PSScriptRoot 'req
 $s = Step 'cross'   { & $Run lookup --request-file (Join-Path $PSScriptRoot 'req2.json') --json }; if ($s -notmatch '"hit": "exact"') { exit 1 }
 $s = Step 'negative'{ & $Run lookup --request-file (Join-Path $PSScriptRoot 'req3.json') --json }; if ($s -match '"hit": "exact"')  { exit 1 }
 $s = Step 'digest'  { & $Run digest };                                                             if ($s -notmatch 'ERR_REQUIRE_ESM') { exit 1 }
+# entry contract: --continue is handled by run.ps1 itself (exit 0 when model complete, 3 when pending)
+& $Run --continue | Out-Null
+$rc = $LASTEXITCODE; Write-Output "[continue] exit=$rc"; if ($rc -ne 0 -and $rc -ne 3) { exit 1 }
+# entry contract: structured error + exit 1 on bad input
+& $Run lookup --request-file (Join-Path $PSScriptRoot 'nope.json') --json | Out-Null
+if ($LASTEXITCODE -ne 1) { Write-Output 'expected exit 1 on missing request file'; exit 1 }
 
 & $Run server stop --json | Out-Null
 Remove-Item $env:PITFALL_DB -ErrorAction SilentlyContinue

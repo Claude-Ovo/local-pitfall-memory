@@ -24,9 +24,21 @@ RULES = [
     (re.compile(r"((?:api[_-]?key|secret[_-]?(?:access[_-]?)?key|private[_-]?key|client[_-]?secret|secret|token|passw(?:or)?d|authorization)\s*[=:]\s*[\"']?)(?!Bearer\b|Basic\b)[^\s\"'&]{6,}", re.I), r"\1<REDACTED>"),
     # email
     (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "<EMAIL>"),
-    # public IPv4 (private ranges kept)
-    (re.compile(r"\b(?!10\.|127\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b"), "<IP>"),
 ]
+
+# IPs are handled token-level with `ipaddress` (IPv4 + IPv6): public → <IP>, private/loopback/link-local kept.
+_IP_TOKEN_RE = re.compile(r"(?<![\w:.])((?:\d{1,3}\.){3}\d{1,3}|(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4})(?![\w.])")
+
+def _mask_ip(m):
+    import ipaddress
+    tok = m.group(1)
+    try:
+        ip = ipaddress.ip_address(tok)
+    except ValueError:
+        return tok
+    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
+        return tok
+    return "<IP>"
 
 _HOME = os.environ.get("USERPROFILE") or os.environ.get("HOME") or ""
 _USER = os.environ.get("USERNAME") or os.environ.get("USER") or ""
@@ -43,6 +55,7 @@ def redact(text: str, extra_secrets=()) -> str:
             s = s.replace(sec, "<REDACTED>")
     for pat, rep in RULES:
         s = pat.sub(rep, s)
+    s = _IP_TOKEN_RE.sub(_mask_ip, s)
     # username first (any path containing it), then the full home dir → "~"
     if _USER_RE:
         s = _USER_RE.sub("<USER>", s)
