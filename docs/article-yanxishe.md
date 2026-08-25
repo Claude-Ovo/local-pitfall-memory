@@ -54,7 +54,7 @@ lookup(报错) → exact   指纹全同                       → 可引用（�
 按 `openvino-dev-samples/local-ai-skill-authoring` 的契约实现：`scripts/run.ps1` 固定入口（第一行 `Stop`、可执行硬件门、`--continue` 续传、exit 3 = 下载未完）、`install-env.ps1`（marker 绑 requirements hash）、`client.py` 短命 + `server.py` 常驻、`info.json` 声明模型与 `required_files`、原子下载（`.partial → os.replace`）。
 
 **实测（桌面 CPU，无 GPU/NPU）**：模型加载 6 s · 单次归因 15–17 s · 嵌入 0.11 s · 混合查询 0.4 s · exact/family < 0.1 s
-**基准（26 条真实/精选报错）**：JSON 合法率 __ · 错误类一致率 __ · p50 __ s · p95 __ s · 峰值 RSS __ MB（待填：`docs/bench-2026-08-25.md`）
+**基准（26 条报错：6 条从真实 Sensei 会话挖出 + 20 条精选）**：JSON 合法率 **100%**（26/26 一次合法）· p50 **10.5 s** · p95 **14.7 s** · 常驻服务峰值 RSS **4.9 GB**（归因器 + 嵌入器）· 根因猜测人工核对 25/26 正确。"错误类一致率"53.8% 是字符串重合口径，不一致的 12 条里 5 条是正则根本没抓到类名（git/docker 报错没有 `XxxError` 记号）、7 条是模型给了更具体的语义标签（`PortConflict` / `CUDAOutOfMemory` / `DependencyConflict`），**没有一条判错类**。明细：`docs/bench-2026-08-25.md`
 **为什么是 4B 不是 8B**：归因只要稳定吐 4 个字段的 JSON，不需要它独立修 bug；4B-INT4 首轮即合法且正确，CPU 上 8B 只会把延迟翻倍。
 
 ## 4. 在 Qoder 里跑通（四件证据）
