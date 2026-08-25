@@ -49,7 +49,16 @@ scripts\run.ps1 digest --out pitfalls.md
 
 ```
 scripts\run.ps1 status --json
+scripts\run.ps1 server status|start|stop --json     # resident attribution engine (Qwen3-4B INT4 @ OpenVINO)
 ```
+
+### Local model policy (read before relying on timings)
+
+- Fingerprint lookup is deterministic and fast (< 1s). The local model is **never** on that path.
+- The model runs only (a) once on the **first record** of a new pit in `propose` (~15–25s on CPU; skip with `--no-model`),
+  and (b) on fuzzy results (`semantic`/`none`) when you pass `lookup --attribute`.
+- Any model failure or timeout is soft: the reply simply lacks the `attribution` field.
+- The engine stays resident and exits by itself after `server_alive_timeout` seconds idle (info.json).
 
 Important:
 - `scripts\run.ps1` is the only supported interface — do not call other scripts directly.

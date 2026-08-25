@@ -10,11 +10,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from redact import redact, redact_card  # noqa: E402
+import engine  # noqa: E402  (local model bridge; every call is soft-fail → None)
+
+# Model policy (MODELSCOPE-SKILL-PLAN.md §6): NEVER on the lookup hot path.
+# Only consulted (a) on first record in `propose`, (b) on fuzzy lookups (semantic/none) when --attribute is given.
+MODEL_TIMEOUT_S = float(os.environ.get("PITFALL_MODEL_TIMEOUT", "45"))
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 DB_PATH = Path(os.environ.get("PITFALL_DB", Path.home() / ".pitfall-memory" / "pitfalls.db"))
 MODEL_DIR = Path.home() / ".openvino" / "models" / "Qwen3-4B-int4-ov"
 
@@ -23,7 +28,8 @@ CREATE TABLE IF NOT EXISTS pitfalls(
   id INTEGER PRIMARY KEY,
   exact_fp TEXT UNIQUE, family_fp TEXT,
   runtime TEXT, error_class TEXT, package TEXT,
-  norm_tail TEXT, created_at INTEGER
+  norm_tail TEXT, created_at INTEGER,
+  attribution TEXT
 );
 CREATE TABLE IF NOT EXISTS occurrences(
   id INTEGER PRIMARY KEY, pitfall_id INTEGER REFERENCES pitfalls(id),
@@ -97,7 +103,16 @@ def db():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.executescript(SCHEMA)
+    # migration for DBs created by v0.1/v0.2 (no attribution column)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(pitfalls)")}
+    if "attribution" not in cols:
+        conn.execute("ALTER TABLE pitfalls ADD COLUMN attribution TEXT")
     return conn
+
+def _attribute(error_text, ctx):
+    """Ask the local model for a structured guess. Soft: returns None on any failure/timeout."""
+    r = engine.attribute(error_text, ctx, timeout=MODEL_TIMEOUT_S)
+    return redact_card(r) if r else None
 
 def out(obj, as_json):
     print(json.dumps(obj, ensure_ascii=False, indent=None if as_json else 2))
@@ -168,10 +183,16 @@ def cmd_lookup(args):
             (q,)).fetchall()
         if rows:
             pid = rows[0][0]
-            out({"hit": "semantic", "confidence": "仅联想", "pitfall_id": pid,
-                 "resolution": _resolution_for(conn, pid)}, args.json)
+            resp = {"hit": "semantic", "confidence": "仅联想", "pitfall_id": pid,
+                    "resolution": _resolution_for(conn, pid)}
+            if getattr(args, "attribute", False):
+                resp["attribution"] = _attribute(req["error_text"], ctx)   # fuzzy path only
+            out(resp, args.json)
             return 0
-    out({"hit": "none", "confidence": None, "note": "no local history; solve fresh then propose+commit"}, args.json)
+    resp = {"hit": "none", "confidence": None, "note": "no local history; solve fresh then propose+commit"}
+    if getattr(args, "attribute", False):
+        resp["attribution"] = _attribute(req["error_text"], ctx)           # fuzzy path only
+    out(resp, args.json)
     return 0
 
 def cmd_propose(args):
@@ -181,14 +202,18 @@ def cmd_propose(args):
     now = int(time.time())
     conn = db()
     row = conn.execute("SELECT id FROM pitfalls WHERE exact_fp=?", (feat["exact_fp"],)).fetchone()
+    attribution = None
     if row:
         pid = row[0]
     else:
+        # first record of this pit → one model call to structure it (skippable with --no-model)
+        if not getattr(args, "no_model", False):
+            attribution = _attribute(req["error_text"], ctx)
         cur = conn.execute(
-            "INSERT INTO pitfalls(exact_fp,family_fp,runtime,error_class,package,norm_tail,created_at) "
-            "VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO pitfalls(exact_fp,family_fp,runtime,error_class,package,norm_tail,created_at,attribution) "
+            "VALUES(?,?,?,?,?,?,?,?)",
             (feat["exact_fp"], feat["family_fp"], feat["runtime"], feat["error_class"],
-             feat["package"], feat["norm_tail"], now))
+             feat["package"], feat["norm_tail"], now, json.dumps(attribution, ensure_ascii=False) if attribution else None))
         pid = cur.lastrowid
         conn.execute("INSERT INTO pitfall_fts(rowid,semantic_text) VALUES(?,?)", (pid, feat["semantic_text"]))
     # everything stored is redacted at write time — the DB never holds secrets, emails or public IPs
@@ -200,8 +225,11 @@ def cmd_propose(args):
         (pid, redact(req.get("root_cause", "")), redact(req.get("fix_command", "")),
          redact(req.get("verify_method", "")), now))
     conn.commit()
-    out({"ok": True, "pitfall_id": pid, "proposal_id": cur.lastrowid,
-         "state": "proposed (unverified) — run commit after the fix is verified"}, args.json)
+    resp = {"ok": True, "pitfall_id": pid, "proposal_id": cur.lastrowid,
+            "state": "proposed (unverified) — run commit after the fix is verified"}
+    if attribution:
+        resp["attribution"] = attribution
+    out(resp, args.json)
     return 0
 
 def cmd_commit(args):
@@ -240,10 +268,18 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
     for name in ("status",):
         s = sub.add_parser(name); s.add_argument("--json", action="store_true")
-    for name in ("lookup", "propose"):
-        s = sub.add_parser(name)
-        s.add_argument("--request-file", required=True)
-        s.add_argument("--json", action="store_true")
+    s = sub.add_parser("lookup")
+    s.add_argument("--request-file", required=True)
+    s.add_argument("--json", action="store_true")
+    s.add_argument("--attribute", action="store_true",
+                   help="on semantic/none results, also ask the local model for a structured guess (slow, ~15-20s CPU)")
+    s = sub.add_parser("propose")
+    s.add_argument("--request-file", required=True)
+    s.add_argument("--json", action="store_true")
+    s.add_argument("--no-model", action="store_true", help="skip the one-time model attribution on first record")
+    s = sub.add_parser("server")
+    s.add_argument("action", choices=["status", "start", "stop"])
+    s.add_argument("--json", action="store_true")
     s = sub.add_parser("commit")
     s.add_argument("--id", required=True)
     s.add_argument("--verify-exit-code", required=True)
@@ -253,7 +289,16 @@ def main():
     s.add_argument("--json", action="store_true")
     args = p.parse_args()
     return {"status": cmd_status, "lookup": cmd_lookup, "propose": cmd_propose,
-            "commit": cmd_commit, "digest": cmd_digest}[args.cmd](args)
+            "commit": cmd_commit, "digest": cmd_digest, "server": cmd_server}[args.cmd](args)
+
+def cmd_server(args):
+    if args.action == "status":
+        st = engine.status(); out(st or {"ok": False, "state": "down"}, args.json); return 0 if st else 1
+    if args.action == "start":
+        st = engine.ensure_server(); out(st or {"ok": False, "state": "failed to start"}, args.json); return 0 if st else 1
+    if args.action == "stop":
+        r = engine.shutdown(); out(r or {"ok": True, "state": "already down"}, args.json); return 0
+    return 1
 
 if __name__ == "__main__":
     sys.exit(main())
