@@ -5,6 +5,10 @@ $Root = Split-Path -Parent $PSScriptRoot
 $Run  = Join-Path $Root 'scripts\run.ps1'
 $env:PITFALL_DB = Join-Path $env:TEMP "pitfall-test-$(Get-Random).db"
 
+Write-Output '== unit tests'
+python (Join-Path $PSScriptRoot 'test_unit.py')
+if ($LASTEXITCODE -ne 0) { Write-Output 'UNIT FAIL'; exit 1 }
+Write-Output '== e2e through run.ps1'
 python (Join-Path $PSScriptRoot 'make_fixtures.py') $PSScriptRoot | Out-Null
 
 function Step($name, $script) {
