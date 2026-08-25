@@ -1,0 +1,6 @@
+dist/
+__pycache__/
+*.pyc
+docs/collab/*.log
+docs/collab/*.err
+docs/bench-run.log
