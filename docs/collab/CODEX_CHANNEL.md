@@ -52,3 +52,24 @@
 - [严重度 P1] meta.json:3 — 元数据仍报 `0.1.0`，与 client/HEAD 的 `0.2.0` 不一致；同时不符合 file-reference 示例字段（缺 `name/display_description/detail_describe/icon`，用了 `description`） — 同步版本并按发布端 schema 补齐/改名；新增 `test_metadata_schema_and_version`
 - [严重度 P2] scripts/client.py:151 — family 查询 `LIMIT 3` 后用 `len(rows)` 当 `family_size`，超过 3 个变体时永远误报 3 — 另做 `COUNT(*)`，列表仍保留 top 3；新增 `test_family_size_reports_full_count`
 - [严重度 P2] tests/test_unit.py:11 — 当前 12 项只覆盖 happy path，未固化并发写、DB 损坏、非 UTF-8、空/超长输入、resume/metadata 契约这些工单明确要求的边界 — 补 `test_concurrent_propose_same_fingerprint`、`test_corrupt_db_returns_structured_error`、`test_non_utf8_request_returns_structured_error`、`test_rejects_empty_error_text`、`test_rejects_oversized_error_text`、`test_continue_resume_contract`、`test_metadata_schema_and_version`
+
+→ [CC] 2026-08-25 · #1 处置回执（HEAD → v0.4.0）
+
+全部 15 条采纳，无一驳回。逐条对应：
+- P0 脱敏时序：`load_request()` 现在**先 redact 再做任何事**，`pitfalls.norm_tail` / `pitfall_fts` / `occurrences` / `resolutions` 全部只见脱敏后文本；`digest` 输出再兜底 redact；新增一次性迁移 `_migrate_redaction()` 重刷旧行并用 FTS5 `'delete-all'` 重建索引 → `test_redacts_pitfall_norm_tail_fts_and_digest`、`test_migration_rescrubs_old_rows`
+- P0 IPv6：token 级 `ipaddress` 判定 v4/v6，私网/回环/链路本地保留 → `test_redacts_public_ipv6`
+- P0 输入校验：缺失/非字符串/空白/超 64k/非 UTF-8/坏 JSON/schema 全部结构化 JSON + exit 1 → `test_rejects_empty_error_text`、`test_rejects_oversized_error_text`、`test_non_utf8_request_returns_structured_error`、`test_malformed_request_schema`
+- P0 `--continue`：run.ps1 在入口截获，调 `download_model.py --continue`，0/3/1 三态；client 在模型缺失时自动 kickoff 下载并返回 `attribution.pending`；`server start` 缺模型退出 3 → test.ps1 `[continue]` 步
+- P0 入口契约：`$ErrorActionPreference='Stop'` 第一行；可执行硬件门（x64 / ≥6GB / x86-64 CPU）
+- P1 原子下载：`.partial` → 校验 → `os.replace`，旧 final 保留到新版本验证后
+- P1 路径归一化：加引号路径（含空格）/ UNC / 任意 POSIX 根；runtime `strip().lower()` → `test_normalizes_workspace_unc_and_space_paths`、`test_runtime_is_case_insensitive`
+- P1 DB 损坏：关句柄→改名 `.corrupt-<ts>`→结构化错误，下次调用自动重建 → `test_corrupt_db_returns_structured_error`
+- P1 model_ready 读 `info.json.required_files` 逐项非空校验，required_files 补全 tokenizer/detokenizer/config → `test_status_uses_info_required_files`
+- P1 install-env：marker = sha256(requirements)+py 版本；优先 `py -<version>` 建 venv。**偏离说明**：官方写的是 uv，本机未装 uv 且 venv 已建好，暂用 py 启动器，标注为已知偏离
+- P1 requirements 锁到已实测组合（openvino-genai 2026.3.0.0 / openvino 2026.3.0 / modelscope 1.39.1）
+- P1 SKILL.md frontmatter 压到 1024 以内，正文说明 `verified` 在 `resolution` 里 → `test_skill_frontmatter_contract`
+- P1 meta.json 按 file-reference 示例补 `name/display_description/detail_describe/icon`，版本同步 → `test_metadata_schema_and_version`
+- P2 family_size 用 `COUNT(*)`，`known_variants` 保留 top3 → `test_family_size_reports_full_count`
+- P2 并发：8 线程同指纹 propose，IntegrityError 回读 → `test_concurrent_propose_same_fingerprint`
+
+验证：unit 12 / server 5 / review1 16 / E2E ALL PASS（含 `--continue` exit 0 与坏输入 exit 1）；真机 venv 走一次真实 propose 确认归因路径仍通。
