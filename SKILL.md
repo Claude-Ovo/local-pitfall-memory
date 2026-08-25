@@ -37,11 +37,12 @@ Multi-line error text MUST go through `--request-file`, never inline shell quote
  "pitfall_id": 12, "times_seen": 3, "last_seen": 1787500000,
  "resolution": {"root_cause": "...", "fix_command": "...", "verify_method": "...", "verified": true},
  "family_size": 2, "known_variants": ["..."],          // family hits only
+ "retrieval": {"fused_score": 0.03, "fts_rank": 1, "vec_rank": 2, "channels": ["fts5","vector"], "env_compatible": true},  // semantic hits only
  "attribution": {"error_class": "...", "package": "...", "root_cause_guess": "...", "fix_hint": "..."}  // only with --attribute / first propose
 }
 ```
 
-- 命中层级 `hit`: exact（指纹全同）/ family（同类错误，细节不同）/ semantic（语义相近）/ none
+- 命中层级 `hit`: exact（指纹全同）/ family（同类错误，细节不同）/ semantic（语义相近：FTS5/BM25 与本地向量两路各自排名后 RRF 融合，不同 runtime 的记录降权）/ none
 - 置信 `confidence`: **可引用** = exact 且 `resolution.verified=true`；**需谨慎** = exact 未验证或 family；**仅联想** = semantic
 - Only 可引用 results may be applied without re-verification. `resolution.verified` is inside `resolution`, not top-level.
 - `attribution.pending=true` means the local model is still downloading — run `scripts\run.ps1 --continue`.

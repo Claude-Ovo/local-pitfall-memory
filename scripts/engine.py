@@ -68,6 +68,16 @@ def attribute(error_text: str, context: dict, timeout: float = 45.0, spawn_wait:
     except Exception:
         return None
 
+def embed(text: str, timeout: float = 10.0, spawn_wait: float = 60.0):
+    """Unit vector for `text` from the resident embedder, or None (soft failure)."""
+    try:
+        if ensure_server(spawn_wait) is None:
+            return None
+        resp = _send({"op": "request", "kind": "embed", "text": text}, timeout)
+        return resp["result"] if resp.get("ok") else None
+    except Exception:
+        return None
+
 def shutdown():
     try:
         return _send({"op": "shutdown"}, 5.0)

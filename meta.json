@@ -10,6 +10,6 @@
         "踩坑知识库一键汇编成 Markdown 文档"
     ],
     "author": "ovo-hue",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "tags": ["AI PC", "OpenVINO", "developer-tools", "error-memory", "offline"]
 }

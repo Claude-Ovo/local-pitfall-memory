@@ -16,6 +16,17 @@
                 "openvino_detokenizer.bin",
                 "openvino_detokenizer.xml"
             ]
+        },
+        {
+            "model_id": "OpenVINO/bge-base-en-v1.5-int8-ov",
+            "dir_name": "bge-base-en-v1.5-int8-ov",
+            "required_files": [
+                "openvino_model.bin",
+                "openvino_model.xml",
+                "openvino_tokenizer.bin",
+                "openvino_tokenizer.xml"
+            ],
+            "purpose": "embedding channel for RRF hybrid retrieval (optional; FTS5 works without it)"
         }
     ]
 }
