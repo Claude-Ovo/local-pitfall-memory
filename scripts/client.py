@@ -20,7 +20,7 @@ import engine  # noqa: E402
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 ROOT = Path(__file__).resolve().parent.parent
 INFO = json.loads((ROOT / "info.json").read_text(encoding="utf-8"))
 MODELS_DIR = Path.home() / ".openvino" / "models"
@@ -49,7 +49,10 @@ CREATE VIRTUAL TABLE IF NOT EXISTS pitfall_fts USING fts5(
   semantic_text, content='', tokenize='trigram'
 );
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS embeddings(pitfall_id INTEGER PRIMARY KEY REFERENCES pitfalls(id), dim INTEGER, vec BLOB);
 """
+RRF_K = 60            # standard reciprocal-rank-fusion constant
+SEMANTIC_MIN = 0.02   # fused score floor (≈ rank ≤ 3 in at least one channel); below → "none"
 
 class UserError(Exception):
     """Structured, redacted error returned to the Host with exit code 1."""
@@ -206,6 +209,48 @@ def _kickoff_download():
         kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
     subprocess.Popen([sys.executable, str(Path(__file__).with_name("download_model.py"))], **kw)
 
+def _embed(text):
+    """Vector from the resident embedder (fake in tests). None when unavailable → FTS-only retrieval."""
+    if os.environ.get("PITFALL_FAKE_MODEL") != "1" and not model_ready():
+        return None                       # don't spawn/download just for a vector
+    return engine.embed(text, spawn_wait=float(os.environ.get("PITFALL_EMBED_SPAWN_WAIT", "60")))
+
+def _store_embedding(conn, pid, vec):
+    import struct
+    if not vec:
+        return
+    conn.execute("INSERT OR REPLACE INTO embeddings(pitfall_id,dim,vec) VALUES(?,?,?)",
+                 (pid, len(vec), struct.pack(f"{len(vec)}f", *vec)))
+
+def _vector_rank(conn, qvec, limit=10):
+    """Cosine ranking over stored embeddings (unit vectors → dot product). Small N; pure Python is fine."""
+    import struct
+    if not qvec:
+        return []
+    scored = []
+    for pid, dim, blob in conn.execute("SELECT pitfall_id, dim, vec FROM embeddings"):
+        if dim != len(qvec):
+            continue
+        v = struct.unpack(f"{dim}f", blob)
+        scored.append((sum(a * b for a, b in zip(qvec, v)), pid))
+    scored.sort(reverse=True)
+    return [pid for _, pid in scored[:limit]]
+
+def _rrf(*ranked_lists, k=RRF_K):
+    """Reciprocal rank fusion: score(id) = Σ 1/(k + rank_i). Returns [(id, score)] best first."""
+    score = {}
+    for lst in ranked_lists:
+        for rank, pid in enumerate(lst, 1):
+            score[pid] = score.get(pid, 0.0) + 1.0 / (k + rank)
+    return sorted(score.items(), key=lambda x: -x[1])
+
+def _env_compatible(conn, pid, runtime):
+    """Environment filter: a pit recorded under a different runtime is demoted, not hidden."""
+    if not runtime:
+        return True
+    r = conn.execute("SELECT runtime FROM pitfalls WHERE id=?", (pid,)).fetchone()
+    return (not r or not r[0] or r[0] == runtime)
+
 def _attribute(error_text, ctx):
     """Structured guess from the local model. Soft: None on failure; kicks off download if model missing."""
     if os.environ.get("PITFALL_FAKE_MODEL") != "1" and not model_ready():
@@ -251,15 +296,25 @@ def cmd_lookup(args):
              "times_seen": hits[0], "last_seen": hits[1],
              "family_hint": "same error class/package, different details — verify before applying",
              "known_variants": [redact(r[1]) for r in rows], "resolution": res}); return 0
-    tokens = re.findall(r"[A-Za-z0-9_]{3,}", feat["semantic_text"])[:20]   # 3) semantic → 仅联想
+    # 3) semantic → 仅联想. Hybrid: FTS5/BM25 ranking ⊕ vector cosine ranking, fused by RRF,
+    #    then environment-compat demotion (different runtime sinks below compatible hits).
+    tokens = re.findall(r"[A-Za-z0-9_]{3,}", feat["semantic_text"])[:20]
     q = " OR ".join(f'"{t}"' for t in tokens)
+    fts_rank = [r[0] for r in conn.execute(
+        "SELECT rowid FROM pitfall_fts WHERE pitfall_fts MATCH ? ORDER BY bm25(pitfall_fts) LIMIT 10", (q,)).fetchall()] if q else []
+    vec_rank = _vector_rank(conn, _embed(feat["semantic_text"]))
+    fused = _rrf(fts_rank, vec_rank)
+    compatible = [(pid, s) for pid, s in fused if _env_compatible(conn, pid, feat["runtime"])]
+    demoted = [(pid, s) for pid, s in fused if not _env_compatible(conn, pid, feat["runtime"])]
+    ordered = compatible + demoted
     resp = None
-    if q:
-        rows = conn.execute("SELECT rowid FROM pitfall_fts WHERE pitfall_fts MATCH ? ORDER BY bm25(pitfall_fts) LIMIT 3",
-                            (q,)).fetchall()
-        if rows:
-            pid = rows[0][0]
-            resp = {"hit": "semantic", "confidence": "仅联想", "pitfall_id": pid, "resolution": _resolution_for(conn, pid)}
+    if ordered and ordered[0][1] >= SEMANTIC_MIN:
+        pid, score = ordered[0]
+        resp = {"hit": "semantic", "confidence": "仅联想", "pitfall_id": pid, "resolution": _resolution_for(conn, pid),
+                "retrieval": {"fused_score": round(score, 4), "fts_rank": (fts_rank.index(pid) + 1) if pid in fts_rank else None,
+                              "vec_rank": (vec_rank.index(pid) + 1) if pid in vec_rank else None,
+                              "channels": ["fts5"] + (["vector"] if vec_rank else []),
+                              "env_compatible": _env_compatible(conn, pid, feat["runtime"])}}
     if resp is None:
         resp = {"hit": "none", "confidence": None, "note": "no local history; solve fresh then propose+commit"}
     if args.attribute:                            # fuzzy path only — model allowed here
@@ -284,6 +339,8 @@ def cmd_propose(args):
                                                            feat["package"], feat["norm_tail"], now, stored_attr))
             pid = cur.lastrowid
             conn.execute("INSERT INTO pitfall_fts(rowid,semantic_text) VALUES(?,?)", (pid, feat["semantic_text"]))
+            if not args.no_model:                 # vector channel (soft: skipped when embedder unavailable)
+                _store_embedding(conn, pid, _embed(feat["semantic_text"]))
         except sqlite3.IntegrityError:            # concurrent propose of the same fingerprint
             pid = conn.execute("SELECT id FROM pitfalls WHERE exact_fp=?", (feat["exact_fp"],)).fetchone()[0]
     conn.execute("INSERT INTO occurrences(pitfall_id,cwd,raw_head,seen_at) VALUES(?,?,?,?)",

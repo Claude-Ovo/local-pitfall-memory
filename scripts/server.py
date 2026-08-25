@@ -22,6 +22,8 @@ PIPE_ADDRESS = rf"\\.\pipe\{SKILL_NAME}"
 AUTHKEY = SKILL_NAME.encode("utf-8")
 ROOT = Path(__file__).resolve().parent.parent
 MODEL_DIR = Path.home() / ".openvino" / "models" / "Qwen3-4B-int4-ov"
+EMBED_DIR = Path.home() / ".openvino" / "models" / "bge-base-en-v1.5-int8-ov"
+EMBED_DIM = 768
 LOG = Path.home() / ".pitfall-memory" / "server.log"
 FAKE = os.environ.get("PITFALL_FAKE_MODEL") == "1"
 
@@ -55,6 +57,7 @@ class Server:
     def __init__(self):
         self.state = "starting"; self.error = ""; self.started_at = time.time()
         self.last_used = time.time(); self.pipe = None; self.cfg = None
+        self.embedder = None; self.embed_error = ""
         self.lock = threading.Lock()
 
     def init_async(self):
@@ -75,6 +78,19 @@ class Server:
             self.cfg = cfg
             self.state = "running"
             log(f"model loaded in {time.perf_counter()-t:.1f}s")
+            # embedding channel is optional: failure here never blocks the attribution engine
+            try:
+                if (EMBED_DIR / "openvino_model.xml").exists():
+                    t = time.perf_counter()
+                    ecfg = ov_genai.TextEmbeddingPipeline.Config()
+                    ecfg.normalize = True; ecfg.max_length = 512
+                    ecfg.pooling_type = ov_genai.TextEmbeddingPipeline.PoolingType.CLS
+                    self.embedder = ov_genai.TextEmbeddingPipeline(str(EMBED_DIR), "CPU", ecfg)
+                    log(f"embedder loaded in {time.perf_counter()-t:.1f}s")
+                else:
+                    self.embed_error = f"embedding model missing under {EMBED_DIR}"
+            except Exception:
+                self.embed_error = traceback.format_exc(); log(self.embed_error)
         except Exception:
             self.error = traceback.format_exc(); self.state = "error"; log(self.error)
 
@@ -92,15 +108,42 @@ class Server:
             raw = str(self.pipe.generate(prompt, self.cfg))
         return _first_json(raw)
 
+    def embed(self, text: str):
+        """L2-normalized embedding of `text`, or None when the channel is unavailable."""
+        text = (text or "")[:2000]
+        if FAKE:
+            # deterministic pseudo-embedding: hashed character trigrams → unit vector (tests only)
+            import hashlib, math
+            vec = [0.0] * EMBED_DIM
+            toks = text.lower().split()
+            for tok in toks:
+                h = int(hashlib.md5(tok.encode()).hexdigest(), 16)
+                vec[h % EMBED_DIM] += 1.0
+            n = math.sqrt(sum(v * v for v in vec)) or 1.0
+            return [v / n for v in vec]
+        if self.embedder is None:
+            return None
+        with self.lock:
+            return [float(x) for x in self.embedder.embed_query(text)]
+
     # ---- protocol ----------------------------------------------------------
     def handle(self, msg: dict) -> dict:
         op = msg.get("op"); self.last_used = time.time()
         if op == "status":
             return {"ok": True, "state": self.state, "pid": os.getpid(),
-                    "uptime_s": round(time.time() - self.started_at, 1), "error": self.error, "fake": FAKE}
+                    "uptime_s": round(time.time() - self.started_at, 1), "error": self.error, "fake": FAKE,
+                    "embedder": bool(self.embedder) or FAKE, "embed_error": self.embed_error[:200]}
         if op == "request":
             if self.state != "running":
                 return {"ok": False, "error": f"not ready: {self.state}", "state": self.state}
+            if msg.get("kind") == "embed":
+                try:
+                    t = time.perf_counter(); vec = self.embed(msg.get("text", ""))
+                    if vec is None:
+                        return {"ok": False, "error": "embedding channel unavailable"}
+                    return {"ok": True, "result": vec, "latency_s": round(time.perf_counter() - t, 3)}
+                except Exception as exc:
+                    log(traceback.format_exc()); return {"ok": False, "error": str(exc)}
             if msg.get("kind") != "attribute":
                 return {"ok": False, "error": f"unknown kind: {msg.get('kind')}"}
             try:
