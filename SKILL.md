@@ -64,7 +64,8 @@ Multi-line error text MUST go through `--request-file`, never inline shell quote
 
 - Do not call other scripts directly; `scripts\run.ps1` is the interface.
 - First call downloads the model (~2.3 GB); if it times out, run `scripts\run.ps1 --continue`.
-- Unsupported platform (non-x64 / < 6 GB RAM) prints an error and exits with code 1.
+- Unsupported platform (non-x64 / < 6 GB RAM) prints an error and exits with code 1. ISA-level requirements (e.g. AVX2) are checked by the OpenVINO CPU plugin at load time and surface as a structured `server` error, not by the entry script.
+- The optional embedding model (`bge-base-en-v1.5-int8-ov`) only affects `retrieval_mode` (`hybrid` vs `fts-only`); it never blocks `--continue`.
 - Never fall back to a cloud service; the database, index and retrieval stay on this machine.
 - Everything stored and everything returned is redacted (keys/JWT/emails/public IPs/username).
 
