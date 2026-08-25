@@ -1,0 +1,16 @@
+﻿This is a **verified hit**. Here's exactly what the memory returned:
+
+| Field | Value |
+|---|---|
+| **Hit level** | `exact` — fingerprint match, same error class |
+| **Confidence** | `可引用` (citable — safe to apply without re-verification) |
+| **Times seen** | 1 |
+| **Pitfall ID** | 1 |
+
+**Resolution:**
+- **Root cause:** `package.json` lacks `"type": "module"` while the code uses ESM
+- **Fix command:** `npm pkg set type=module`
+- **Verify method:** `node index.js` exits 0
+- **Verified:** yes
+
+So for your `D:\work\sensei-clone` project, run `npm pkg set type=module` in the repo root (or inside `packages/cli` if that package has its own `package.json`), then retry `node index.js`.

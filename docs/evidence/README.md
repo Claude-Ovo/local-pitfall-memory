@@ -6,3 +6,5 @@
 4. Session log proof — `~/.qoder/logs/sessions/C--Users-miku-pitfall-demo/*.jsonl` contains `tool_name: "Skill"` permission.resolved and `tool.shell.started` with `run.ps1`.
 
 Screenshots/screen recording of the same four steps in an interactive terminal: TODO 8/28 (主片素材).
+
+5. (2026-08-25, v0.5.0) Natural-language trigger re-run after the codex-reviewed rewrite: Qoder invoked the Skill on its own and reported exact / 可引用 / times_seen 1 with the verified resolution. See `2026-08-25-qoder-natural-trigger-v0.5.0.txt`.
