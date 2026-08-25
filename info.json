@@ -7,6 +7,8 @@
         {
             "model_id": "OpenVINO/Qwen3-4B-int4-ov",
             "dir_name": "Qwen3-4B-int4-ov",
+            "role": "attribution",
+            "required": true,
             "required_files": [
                 "config.json",
                 "openvino_model.bin",
@@ -20,13 +22,15 @@
         {
             "model_id": "OpenVINO/bge-base-en-v1.5-int8-ov",
             "dir_name": "bge-base-en-v1.5-int8-ov",
+            "role": "embedding",
+            "required": false,
             "required_files": [
                 "openvino_model.bin",
                 "openvino_model.xml",
                 "openvino_tokenizer.bin",
                 "openvino_tokenizer.xml"
             ],
-            "purpose": "embedding channel for RRF hybrid retrieval (optional; FTS5 works without it)"
+            "purpose": "optional vector channel for hybrid retrieval; FTS5-only when absent"
         }
     ]
 }

@@ -27,10 +27,16 @@ if (-not (Test-Path $py)) {
         }
     }
     if (-not $created) {
-        Write-Output "[install-env] Python $($info.python_version) not found via py launcher; using default python"
+        Write-Output "[install-env] Python $($info.python_version) not found via py launcher; trying default python"
         python -m venv $venv
         if ($LASTEXITCODE -ne 0) { Write-Output '[install-env] venv creation failed'; exit 1 }
     }
+}
+# the venv must really be the requested minor version — never let a fallback interpreter masquerade as it
+$actual = (& $py -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')").Trim()
+if ($actual -ne "$($info.python_version)") {
+    Write-Output "[install-env] venv python is $actual but info.json requires $($info.python_version); install Python $($info.python_version) (py launcher) and delete $venv"
+    exit 1
 }
 Write-Output '[install-env] installing pinned requirements'
 & $py -m pip install --quiet --disable-pip-version-check -r $req

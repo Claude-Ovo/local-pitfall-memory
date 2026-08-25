@@ -17,6 +17,8 @@ class TestRRF(unittest.TestCase):
         self.assertEqual(ids[-1], 4)                   # only one channel, rank3
     def test_rrf_single_channel_ok(self):
         self.assertEqual([p for p, _ in client._rrf([7, 8], [])], [7, 8])
+        # single-channel rank-1 must qualify as a semantic hit (see TestP0.test_fts_only_semantic_hit_without_embedder)
+        self.assertLessEqual(1, client.SEMANTIC_MAX_RANK)
 
 
 class TestHybridCLI(unittest.TestCase):
@@ -70,11 +72,9 @@ class TestHybridCLI(unittest.TestCase):
             "error_text": "PermissionError: [Errno 13] Permission denied: 'out.log'",
             "context": {"runtime": "python"}, "root_cause": "r", "fix_command": "c", "verify_method": "v"}))
         r = self.cli("lookup", "--request-file", self.w("q.json", {
-            "error_text": "EACCES: permission denied, open 'out.log'", "context": {"runtime": "node"}}))
-        if r["hit"] == "semantic":
-            self.assertFalse(r["retrieval"]["env_compatible"])
-        else:
-            self.assertEqual(r["hit"], "none")
+            "error_text": "PermissionError: [Errno 13] Permission denied: 'out.log' when writing", "context": {"runtime": "node"}}))
+        self.assertEqual(r["hit"], "semantic")
+        self.assertFalse(r["retrieval"]["env_compatible"])
 
     def test_no_model_skips_embedding(self):
         self.cli("propose", "--no-model", "--request-file", self.w("a.json", {

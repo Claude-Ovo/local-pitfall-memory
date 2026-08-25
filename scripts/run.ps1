@@ -1,22 +1,24 @@
 $ErrorActionPreference = 'Stop'
-# run.ps1 - fixed entry point (never rename). Contract: hardware gate -> env -> client. Exit codes: 0 ok, 1 unsupported/error, 3 model download pending (rerun with --continue).
+# run.ps1 - fixed entry point (never rename). Contract: platform gate -> env -> client. Exit codes: 0 ok, 1 unsupported/error, 3 model download pending (rerun with --continue).
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 $Root = Split-Path -Parent $PSScriptRoot
 
-# --- 1. Hardware / platform gate (explicit, executable) ----------------------
-# This skill runs the model on CPU via OpenVINO; requirements: 64-bit Windows, >= 6 GB RAM, x86-64 with AVX2.
-if (-not [Environment]::Is64BitOperatingSystem) {
-    Write-Output 'This skill requires 64-bit Windows.'; exit 1
+# --- 1. Platform gate (no WMI/CIM: those can be access-denied in restricted hosts) ------------
+# Requirements: 64-bit Windows on x86-64, >= 6 GB RAM. ISA-level checks (AVX2 etc.) are delegated to the
+# OpenVINO CPU plugin at load time; the client reports a structured error if the model cannot load.
+if (-not [Environment]::Is64BitOperatingSystem) { Write-Output 'This skill requires 64-bit Windows.'; exit 1 }
+$arch = "$env:PROCESSOR_ARCHITEW6432$env:PROCESSOR_ARCHITECTURE"
+if ($arch -notmatch 'AMD64') { Write-Output "This skill requires an x86-64 CPU (found: $arch)."; exit 1 }
+$memGb = $null
+try {
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    $memGb = [math]::Round((New-Object Microsoft.VisualBasic.Devices.ComputerInfo).TotalPhysicalMemory / 1GB, 1)
+} catch {
+    try { $memGb = [math]::Round((Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory / 1GB, 1) } catch { $memGb = $null }
 }
-$memGb = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)
-if ($memGb -lt 6) {
-    Write-Output "This skill needs at least 6 GB RAM (found $memGb GB)."; exit 1
-}
-$arch = (Get-CimInstance Win32_Processor | Select-Object -First 1).Architecture   # 9 = x64
-if ($arch -ne 9) {
-    Write-Output 'This skill requires an x86-64 CPU (OpenVINO CPU plugin).'; exit 1
-}
+if ($null -ne $memGb -and $memGb -lt 6) { Write-Output "This skill needs at least 6 GB RAM (found $memGb GB)."; exit 1 }
+# (if memory cannot be determined at all, continue: the model loader will surface a structured error)
 
 # --- 2. Ensure Python environment -------------------------------------------
 & (Join-Path $PSScriptRoot 'install-env.ps1')
