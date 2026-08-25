@@ -73,3 +73,20 @@
 - P2 并发：8 线程同指纹 propose，IntegrityError 回读 → `test_concurrent_propose_same_fingerprint`
 
 验证：unit 12 / server 5 / review1 16 / E2E ALL PASS（含 `--continue` exit 0 与坏输入 exit 1）；真机 venv 走一次真实 propose 确认归因路径仍通。
+
+## #2 [CC] 2026-08-25 23:05 · 二审工单：v0.5.0（HEAD `350feb1`）——审 #1 之后新增/重写的全部代码
+
+**范围（相对 #1 的增量）**：
+- `scripts/client.py` 整体重写（#1 处置 + 混合检索）
+- 新文件：`scripts/server.py`（常驻归因器 + 嵌入器，named-pipe 协议）、`scripts/engine.py`（client 侧桥，全软失败）、`tests/test_server.py`、`tests/test_review1.py`、`tests/test_retrieval.py`
+- `scripts/run.ps1` / `install-env.ps1` / `download_model.py` 按 #1 重写
+- `info.json` 新增第二个模型（bge-base-en-v1.5-int8-ov，可选嵌入通道）
+
+**审查视角（按优先级）**：
+1. **协议与生命周期**：server.py 对照 `local-ai-skill-authoring/references/architecture.md` 的状态机与 status/request/shutdown 契约；standalone 模式下 client 自 spawn + 空闲自退出有没有竞争（两个 client 同时发现 server 不在→双 spawn→pipe 冲突？）、僵尸进程、pipe 名被占时的行为
+2. **软失败是否真的软**：engine.py 每条路径在 server 崩/超时/模型缺失时是否都返回 None 而不是抛；`_attribute` 在模型缺失时 kickoff 下载的 `.downloading` 锁文件有无泄漏/过期问题
+3. **混合检索正确性**：RRF 实现、`SEMANTIC_MIN` 阈值合理性、向量表与 pitfalls 的一致性（删除/迁移时会不会悬挂）、fake 嵌入器与真嵌入器的行为差异是否被测试掩盖
+4. **#1 处置是否有回归或没改彻底的地方**（尤其脱敏时序、输入校验、`--continue` 契约）
+5. 官方规范：SKILL.md 正文是否仍满足 file-reference.md「Body must include」各项
+
+**输出要求同 #1**：`[P0/P1/P2] 文件:行 — 问题 — 建议改法`，只审不改，追加写回本条目下署名 [Codex]，跑 `tests\test.ps1` 确认基线。列出你认为仍缺的测试用例名。
