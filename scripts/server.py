@@ -20,10 +20,11 @@ PIPE_ADDRESS = rf"\\.\pipe\{SKILL_NAME}"
 AUTHKEY = SKILL_NAME.encode("utf-8")
 ROOT = Path(__file__).resolve().parent.parent
 INFO = json.loads((ROOT / "info.json").read_text(encoding="utf-8"))
-MODELS_DIR = Path.home() / ".openvino" / "models"
-LOG = Path.home() / ".pitfall-memory" / "server.log"
+MODELS_DIR = Path(os.environ.get("PITFALL_MODELS_DIR") or (Path.home() / ".openvino" / "models"))
+LOG = Path(os.environ.get("PITFALL_SERVER_LOG") or (Path.home() / ".pitfall-memory" / "server.log"))
+LOG_MAX_BYTES = 1_000_000
 FAKE = os.environ.get("PITFALL_FAKE_MODEL") == "1"
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 FAKE_DIM = 768
 
 for s in (sys.stdout, sys.stderr):
@@ -31,10 +32,13 @@ for s in (sys.stdout, sys.stderr):
         s.reconfigure(encoding="utf-8")
 
 def log(msg):
+    """Diagnostics log. codex #3 P0: everything written here is redacted first (tracebacks included); rotates at 1 MB."""
     try:
         LOG.parent.mkdir(parents=True, exist_ok=True)
+        if LOG.exists() and LOG.stat().st_size > LOG_MAX_BYTES:
+            os.replace(LOG, LOG.with_suffix(".log.1"))
         with LOG.open("a", encoding="utf-8") as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {redact(str(msg))}\n")
     except Exception:
         pass
 

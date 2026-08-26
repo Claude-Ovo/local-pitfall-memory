@@ -74,7 +74,8 @@ lookup(报错) → exact   指纹全同                       → 可引用（�
 
 ```powershell
 git clone <repo> .qoder/skills/local-pitfall-memory
-.qoder\skills\local-pitfall-memory\scripts\run.ps1 status --json      # 首次建 venv + 下模型（约 2.4 GB，可 --continue 续传）
+.qoder\skills\local-pitfall-memory\scripts\run.ps1 status --json      # 首次建 venv，并报告模型是否就绪
+.qoder\skills\local-pitfall-memory\scripts\run.ps1 --continue         # 下载/续传模型（约 2.4 GB）
 .qoder\skills\local-pitfall-memory\tests\test.ps1                      # unit 12 / server 5 / review 16 / retrieval 5 / E2E，全程不碰 OpenVINO
 ```
 
