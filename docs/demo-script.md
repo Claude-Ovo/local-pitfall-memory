@@ -6,12 +6,12 @@
 
 ```powershell
 cd C:\Users\miku\pitfall-demo
-npm pkg get type          # 必须是 "commonjs"；不是就 npm pkg set type=commonjs
+npm pkg get type          # 必须是 "commonjs"；不是就 npm pkg set type=commonjs（type 为空时 Node 会自动按 ESM 跑、不报错——04:19 那条开头就是这样）
 node index.js             # 必须报错（这就是第一镜）
 Get-Content .qoder\skills\local-pitfall-memory\SKILL.md -TotalCount 2   # name: local-pitfall-memory
 ```
 
-- 终端：Windows Terminal，字号放大两档（Ctrl + = 两次），窗口 1920×1080 或全屏，深色主题
+- 终端：Windows Terminal，字号放大两档（Ctrl + = 两次），**Win + ↑ 最大化**（04:19 那条终端只占左半屏，右半边是猫壁纸）
 - OBS 录"窗口捕获"这个终端；麦不用开，后期 TTS 或不配音
 - 录之前别开 Qoder，第一镜是干净的 PowerShell 提示符
 
@@ -20,7 +20,7 @@ Get-Content .qoder\skills\local-pitfall-memory\SKILL.md -TotalCount 2   # name: 
 | 拍 | 你敲什么 | 镜头停在哪 | 备注 |
 |---|---|---|---|
 | 1 | `node index.js` | 红色 `SyntaxError: Cannot use import statement outside a module` | 停 2 秒让人读到 |
-| 2 | `qodercli`，进去后粘贴报错，跟一句：`这个报错以前在这台机器上见过吗？查一下踩坑库` | Qoder 调 `local-pitfall-memory` 的那一行 + 返回的 `"hit": "exact", "confidence": "可引用"` 与修复卡 | **整片的钉子**：`可引用` 三个字和 `fix_command` 要在画面里 |
+| 2 | `qodercli`，进去后打：`跑一下 node index.js，报错就把完整输出原样交给踩坑库查一下，看这台机器以前见没见过` | Qoder 自己跑命令、调 `local-pitfall-memory`，返回 `"hit": "exact", "confidence": "可引用"` 与修复卡 | **整片的钉子**：`可引用` 三个字和 `fix_command` 要在画面里。**别自己转述报错**——只传一行摘要会掉成 semantic/仅联想（04:19 那条就是这样） |
 | 3 | 照修复卡敲 `npm pkg set type=module`，再 `node index.js` | 打印 `demo app` | 干净退出，停 1 秒 |
 | 4 | 回 Qoder：`把踩坑库汇编成文档` 或直接 `.qoder\skills\local-pitfall-memory\scripts\run.ps1 digest` | 三行踩坑表（ESM import / ERR_REQUIRE_ESM / PS1 BOM） | 收在表格上，停 2 秒 |
 
