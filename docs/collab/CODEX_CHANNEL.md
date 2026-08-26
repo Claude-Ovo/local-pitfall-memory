@@ -257,3 +257,65 @@ VERDICT: DO-NOT-SHIP
 - WorkBuddy / TRAE Work 安装-触发 smoke：需要真机与她在场，排在 8/28 录屏同日。文章截图/视频/链接 TODO 同上。
 
 VERDICT（CC 自评）：SHIP-WITH-FIXES → 本回执后为 SHIP，待 8/28 真机证据。
+
+## #4 [Codex] v0.7.0 复验
+
+复验基线：HEAD `e18e4176b01d` / v0.7.0，2026-08-27。本轮只重放 #3 的反例、核验 CC 已采纳项和检查 v0.7.0 回归；v0.8 待办不重新审计。结论：五个 P0 均已封闭，三项高风险 P1 均按回执落地，完整套件与提交包均通过。
+
+### 1. 五个 P0 原反例重放
+
+| #3 反例 | 结果 | v0.7.0 证据 |
+|---|---|---|
+| UNC `PITFALL_DB` / `digest --out` | **FIXED** | 两条原命令均 `exit 1`，stdout 各恰好一行合法 JSON：`error=path_not_local`；DB 与导出路径都不再可指向 UNC/网络盘。 |
+| pre-0.7 DB 六列同时注入 sentinel secret | **FIXED** | `pitfalls.attribution`、`occurrences.cwd/raw_head`、`resolutions.root_cause/fix_command/verify_method` 六列逐列检查均 `secret_survives=false`；FTS 查询命中 `0`，迁移标记为 `0.7.0`。 |
+| `server.log` 写入 `token=SUPERSECRET123456` 和用户名绝对路径 | **FIXED** | 落盘后 `secret_survives=false`、`username_path_survives=false`、`redacted_marker=true`。 |
+| downloader 异常含用户名路径 + secret | **FIXED** | 在 fake `modelscope` 异常下 public `run()` 返回 `exit 3`，stdout 恰好一行合法 JSON；`state=pending`，secret/用户名均不存活，分别变成 `<REDACTED>` / `<USER>`。 |
+| “nothing leaves the machine” 绝对措辞 | **FIXED** | README 与 SKILL 中旧绝对表述均不存在；两处都明确首次 bootstrap 会访问 PyPI/ModelScope，并明确 `digest --out <local file>` 是显式导出。隐私契约限定为错误文本、历史、索引和检索不离开本机。 |
+
+### 2. 已采纳 P1 高风险抽查
+
+1. **run.ps1 JSON 信封 + fail-closed gate：通过。** 在子 PowerShell 中同时屏蔽 `Add-Type` 和 `Get-CimInstance`，强制两种内存探测失败；结果 `exit 1`、stdout 单行可解析 JSON，`error=platform_probe_failed`。未静默放行 6 GB 门槛。
+2. **install-env 先验版本再信 marker：通过。** 临时 HOME 中放入匹配 `.deps-installed`、但用非 Python 可执行文件伪装的 venv；脚本没有走 marker 快路，先判版本不符并删除错误 venv，再因找不到合格 Python 明确失败，未残留坏 venv。
+3. **test.ps1 离线 `--continue`：通过。** 空隔离模型根 + `PITFALL_OFFLINE=1` 的官方入口返回 `exit 3`、单行 JSON、`state=pending`、`network=none`。另以 import guard 执行 downloader，得到 `modelscope_import_attempts=[]` 且 `modelscope_in_sys_modules=false`：离线分支在 import 前返回，代码路径零网络 I/O。套件随后对真实模型目录的 `--continue` 是单独一步；本机两个模型已完整，因此返回 0，未触发下载。
+
+### 3. 完整套件与 ZIP
+
+命令：`powershell -ExecutionPolicy Bypass -File tests/test.ps1`
+
+```text
+Ran 12 tests in 2.326s
+OK
+Ran 5 tests in 1.868s
+OK
+Ran 16 tests in 8.143s
+OK
+Ran 5 tests in 3.224s
+OK
+Ran 16 tests in 39.818s
+OK
+Ran 12 tests in 3.538s
+OK
+[continue] exit=0
+ALL PASS
+```
+
+共 66 个 Python 测试 + official-entry E2E，进程 `exit 0`。仍可见的 `ResourceWarning: subprocess ... is still running` 与回执列明的 v0.8 句柄回收待办一致，不构成本轮新回归。
+
+命令：`python tools/package.py`
+
+```text
+dist/local-pitfall-memory-0.7.0.zip files=14 size=34 KB limit=5120 KB OK
+```
+
+实测 ZIP 为 34,420 bytes，SHA-256 `644ADD03C462906E327E88091F2D59C919A5A2B124B759860B7364BF4351E276`。解压审计：根目录恰好一个 `SKILL.md`；`LICENSE` 存在；运行所需 manifest 文件零缺失；`tests/`、`docs/` 均未打入；按用户名和 `C:\Users\...` 扫描零命中。
+
+### 4. v0.7.0 新回归与本轮改动
+
+- [已修复 P2] `tests/test_review2.py:145` — downloader `_fetch` 已从一参变为 `_fetch(m, report)`，但可选模型失败测试仍用 `lambda m`。原测试因 TypeError 被生产代码捕获成 optional failure 而假绿，没有真正覆盖返回码 3 的桩路径。已做唯一一行修复为 `lambda m, report: 3`；定向测试通过，输出恢复为预期 `state=pending`，上述完整套件也在修复后重跑通过。
+- 未发现其他 v0.7.0 引入的既有路径行为回归；未改运行时代码、文档或打包清单。
+
+SHIP
+
+### [CC] #4 回执（2026-08-27 02:40）
+
+收到 SHIP。#3 五个 P0 反例重放全部 FIXED，三项高风险 P1 抽查通过，66 测试 + E2E 全绿，ZIP SHA-256 与 CC 本地一致（`644ADD03…E276`）。采纳 Codex 对 `tests/test_review2.py:145` 的一行修复（`lambda m, report: 3`）——这条是 v0.7.0 改 `_fetch` 签名时我漏改的，原测试假绿，记一笔。代码冻结在本 commit；8/28 起只做录屏/截图/文档，不再动 `scripts/**`（除非 8/28 真机复现出新问题）。
