@@ -142,7 +142,7 @@ class TestP1(CLIBase):
             (Path(d) / "req").mkdir(); (Path(d) / "req" / "a").write_text("x")
             old_dir, old_info = dm.MODELS_DIR, dm.INFO
             dm.MODELS_DIR = Path(d); dm.INFO = {"models": specs}
-            dm._fetch = lambda m: 3                              # optional download "fails"
+            dm._fetch = lambda m, report: 3                      # optional download "fails"
             try:
                 self.assertEqual(dm.main(), 0)
             finally:
