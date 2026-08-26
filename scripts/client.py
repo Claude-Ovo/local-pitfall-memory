@@ -21,10 +21,10 @@ import engine  # noqa: E402
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 ROOT = Path(__file__).resolve().parent.parent
 INFO = json.loads((ROOT / "info.json").read_text(encoding="utf-8"))
-MODELS_DIR = Path.home() / ".openvino" / "models"
+MODELS_DIR = Path(os.environ.get("PITFALL_MODELS_DIR") or (Path.home() / ".openvino" / "models"))
 DB_PATH = Path(os.environ.get("PITFALL_DB", Path.home() / ".pitfall-memory" / "pitfalls.db"))
 MODEL_TIMEOUT_S = float(os.environ.get("PITFALL_MODEL_TIMEOUT", "45"))
 FAKE = os.environ.get("PITFALL_FAKE_MODEL") == "1"
@@ -74,6 +74,27 @@ def deep_redact(obj):
 
 def out(obj):
     print(json.dumps(deep_redact(obj), ensure_ascii=False))
+
+# ---- locality guard (codex #3 P0): the DB and any export must stay on a local volume ----------------
+def _drive_type(path: Path):
+    """Windows GetDriveTypeW: 2 removable, 3 fixed, 4 remote, 5 cdrom, 6 ramdisk; None if unknown/non-Windows."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        root = os.path.splitdrive(str(path.resolve()))[0]
+        if not root:
+            return None
+        return ctypes.windll.kernel32.GetDriveTypeW(root + "\\")
+    except Exception:
+        return None
+
+def assert_local_path(path: Path, what: str):
+    s = str(path)
+    if s.startswith("\\\\") or s.startswith("//"):
+        raise UserError("path_not_local", f"{what} must be on a local drive, not a UNC/network path")
+    if _drive_type(path) == 4:
+        raise UserError("path_not_local", f"{what} must be on a local drive, not a mapped network drive")
 
 # ---- deterministic normalization (what to strip / what to KEEP) ---------------
 STRIP_PATTERNS = [
@@ -179,7 +200,11 @@ def load_request(path: str, need_resolution: bool = False) -> dict:
 
 # ---- db --------------------------------------------------------------------
 def db():
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    assert_local_path(DB_PATH, "PITFALL_DB")
+    try:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise UserError("db_error", f"cannot create database directory: {exc.strerror}")
     conn = None
     try:
         conn = sqlite3.connect(DB_PATH, timeout=10)
@@ -217,7 +242,28 @@ def _migrate(conn):
             if n != (rt or ""):
                 conn.execute("UPDATE pitfalls SET runtime=? WHERE id=?", (n, pid))
         conn.execute("INSERT INTO meta(k,v) VALUES('runtime_migrated', ?)", (VERSION,))
+    # codex #3 P0: rows written by pre-0.7 versions may hold unredacted text in ANY string column — scrub all of them
+    if not conn.execute("SELECT v FROM meta WHERE k='full_scrub_migrated'").fetchone():
+        _scrub_all(conn)
+        conn.execute("INSERT INTO meta(k,v) VALUES('full_scrub_migrated', ?)", (VERSION,))
     conn.commit()
+
+SCRUB_COLUMNS = {"pitfalls": ("error_class", "package", "norm_tail", "attribution"),
+                 "occurrences": ("cwd", "raw_head"),
+                 "resolutions": ("root_cause", "fix_command", "verify_method")}
+
+def _scrub_all(conn):
+    """Redact every string column of every table, then rebuild the FTS index from the scrubbed rows."""
+    for table, cols in SCRUB_COLUMNS.items():
+        for row in conn.execute(f"SELECT id,{','.join(cols)} FROM {table}").fetchall():
+            pid, vals = row[0], row[1:]
+            new = [redact(v) if isinstance(v, str) else v for v in vals]
+            if new != list(vals):
+                conn.execute(f"UPDATE {table} SET {','.join(c + '=?' for c in cols)} WHERE id=?", (*new, pid))
+    conn.execute("INSERT INTO pitfall_fts(pitfall_fts) VALUES('delete-all')")
+    for pid, ec, pkg, tail in conn.execute("SELECT id,error_class,package,norm_tail FROM pitfalls").fetchall():
+        conn.execute("INSERT INTO pitfall_fts(rowid,semantic_text) VALUES(?,?)",
+                     (pid, " ".join(x for x in (ec, pkg, tail) if x)[:1000]))
 
 # ---- models ------------------------------------------------------------------
 def _spec(role):
@@ -447,8 +493,16 @@ def cmd_digest(args):
         lines.append(f"| {cell(ec) or cell(tail)} | {cell(pkg)} | {cell(cause)} | `{cell(fix)}` | {cnt} |")
     text = "\n".join(lines) + "\n"
     if args.out:
-        Path(args.out).write_text(text, encoding="utf-8")
-        out({"ok": True, "out": args.out, "verified_entries": len(rows)})
+        # explicit, user-requested export: the ONE documented way redacted content leaves the DB file.
+        target = Path(args.out)
+        assert_local_path(target, "--out")
+        if target.exists() and target.is_dir():
+            raise UserError("output_unwritable", "--out must be a file path, not a directory")
+        try:
+            target.write_text(text, encoding="utf-8")
+        except OSError as exc:
+            raise UserError("output_unwritable", f"cannot write --out file: {exc.strerror}")
+        out({"ok": True, "out": str(target), "verified_entries": len(rows)})
     else:
         print(text)
     return 0
@@ -464,8 +518,17 @@ def cmd_server(args):
         r = engine.shutdown(); out(r or {"ok": True, "state": "already down"}); return 0
     return 1
 
+class _Parser(argparse.ArgumentParser):
+    """argparse normally prints usage to stderr and exits 2; the Host contract is one JSON line + exit 1."""
+    def error(self, message):
+        raise UserError("bad_arguments", message)
+    def exit(self, status=0, message=None):          # --help still works (status 0), everything else is structured
+        if status == 0:
+            sys.exit(0)
+        raise UserError("bad_arguments", (message or "").strip())
+
 def main():
-    p = argparse.ArgumentParser(prog="local-pitfall-memory")
+    p = _Parser(prog="local-pitfall-memory")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("status"); s.add_argument("--json", action="store_true")
     s = sub.add_parser("lookup"); s.add_argument("--request-file", required=True); s.add_argument("--json", action="store_true")
@@ -476,14 +539,18 @@ def main():
     s.add_argument("--json", action="store_true")
     s = sub.add_parser("digest"); s.add_argument("--out"); s.add_argument("--json", action="store_true")
     s = sub.add_parser("server"); s.add_argument("action", choices=["status", "start", "stop"]); s.add_argument("--json", action="store_true")
-    args = p.parse_args()
     try:
+        args = p.parse_args()
         return {"status": cmd_status, "lookup": cmd_lookup, "propose": cmd_propose, "commit": cmd_commit,
                 "digest": cmd_digest, "server": cmd_server}[args.cmd](args)
     except UserError as exc:
         out({"ok": False, "error": exc.code, "message": str(exc)}); return exc.exit_code
     except sqlite3.DatabaseError as exc:
         out({"ok": False, "error": "db_error", "message": str(exc)}); return 1
+    except OSError as exc:
+        out({"ok": False, "error": "io_error", "message": f"{exc.__class__.__name__}: {exc.strerror or exc}"}); return 1
+    except Exception as exc:                          # last resort: never a raw traceback on the Host's stdout
+        out({"ok": False, "error": "internal_error", "message": f"{exc.__class__.__name__}: {str(exc)[:200]}"}); return 1
 
 if __name__ == "__main__":
     sys.exit(main())

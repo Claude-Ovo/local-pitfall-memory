@@ -135,3 +135,125 @@
 - 未做的补充用例（记入待办）：`test_busy_server_status_remains_bounded`（需要 server 侧独立 status 线程，v0.7 再做）、`test_pipe_name_occupied_returns_structured_error`（server 已改为 pipe 被占时 exit 2，但无测试）、`test_downloader_atomic_swap_survives_second_replace_failure`、`test_real_embedder_smoke_shape_and_normalization`（真模型，不进默认套件）
 
 验证：unit 12 / server 5 / review1 16 / retrieval 5 / review2 16 / E2E ALL PASS（新硬件门通过，`--continue` exit 0）；venv 真模型 propose 一次确认归因+嵌入路径仍通。
+
+## #3 [Codex] 评委视角终审
+
+审查基线：HEAD `6be902570215` / v0.6.0，2026-08-26。按陌生评委在干净 Windows AI PC 上安装的视角，读完指定文档、全部 `scripts/*`、`tests/*` 与打包器；实际执行打包、解压运行、隐私反例和完整测试。结论先行：核心检索链和回归套件已经很扎实，但当前绝对隐私口径可被代码路径直接反证，且安装/失败契约与演示材料尚未达到提交态，**暂不应提交**。
+
+### 1. 干净机路径：`scripts\run.ps1`
+
+| 阶段 | 干净机行为 | 可能失败/等待 | 对 Host 的契约 |
+|---|---|---|---|
+| PowerShell 启动 | 直接执行 `run.ps1` | 执行策略/MOTW 可在脚本运行前拦截 | PowerShell 自身错误，非 JSON；README 未给 `-ExecutionPolicy Bypass` 形式 |
+| x64 / 6 GB gate | `Is64BitOperatingSystem` + `PROCESSOR_ARCHITECTURE`；内存先 `ComputerInfo`、再 CIM | 非 x64/低内存立即失败；两种内存探测都失败时**放行**，所以 6 GB 门是 fail-open | gate 失败为纯文本 + exit 1；不是承诺的 JSON |
+| 建 venv | `~\.openvino\venv\local-pitfall-memory`，优先 `py -3.13`，否则默认 `python` | 无 Python/py、Store alias、权限、磁盘、venv 模块、错误 minor version；错误版本 venv 会残留且只提示用户手删 | 多为纯文本/PowerShell 异常 + exit 1；marker 命中在版本核验前直接 exit 0 |
+| 装依赖 | 每个命令先跑 pinned `pip install`（marker 首次缺失时） | PyPI、代理/TLS、磁盘、wheel 可用性；`--quiet` 且无总超时，陌生用户观感像挂起 | pip 文本或 `[install-env] ... failed`，非 JSON |
+| `status` + 首个 DB | 不下载模型；创建 `~\.pitfall-memory\pitfalls.db`/FTS5，返回 ready 状态 | 目录权限/OSError、无 FTS5、坏 info/requirements | 已枚举的 SQLite/请求错误可结构化；其他异常仍 traceback |
+| 首个模型型命令 | `propose` / `lookup --attribute` 后台启动 downloader；`server start` 也启动 | 后台 stdout/stderr 被丢弃；失败不可见；归因/pipe 最长等待约 60 s + 请求 timeout | propose 返回 `attribution.pending` 且 exit 0；`server start` 返回 JSON + exit 3 |
+| `--continue` | 仍先建环境，再逐个走 ModelScope `snapshot_download`，required 决定 0/3/1，optional 不阻断最终码 | 大模型下载/复制/杀毒扫描/网络可无界等待；锁占用 exit 3；optional 仍会拖长一次调用 | 全部为纯文本，非 JSON；exit 3 路径静态确认，因本轮禁止下载未破坏本机模型来强制复现 |
+| 模型/ISA/pipe 错误 | OpenVINO 在 server 初始化时检查 | load error、pipe 被占、长归因占住单线程 accept | `server status` 可给脱敏摘要；`server start` 常退化为泛化 `failed to start`，lookup/propose 软失败会隐藏具体原因 |
+| `digest --out` | 写用户给定路径 | 目录、权限、无效/远程路径 | 实测目录作输出目标时 stdout 无 JSON、stderr traceback、exit 1 |
+
+- [严重度 P1] `scripts/run.ps1:10-25`, `scripts/install-env.ps1:15-43`, `scripts/client.py:480-486` — “errors are structured JSON”只覆盖少数 client 异常；gate、Python、pip、argparse、文件权限和意外异常均越过该契约，`digest --out <directory>` 已复现 traceback + exit 1 — 在 `run.ps1` 最外层统一捕获并输出单行 JSON，明确保留 exit 2/3 的语义。
+- [严重度 P1] `scripts/run.ps1:13-21` — 6 GB 探测双失败时无告警放行，不能宣称硬件门已执行；低内存/非 x64 失败也不是 JSON — 使用可靠无权限内存 API，未知状态返回结构化 `platform_probe_failed`，不要 fail-open。
+- [严重度 P1] `scripts/install-env.ps1:15-39` — marker 快路径在实际 Python minor 校验前返回，且干净机无 Python 3.13 时只能失败并留下错误 venv，唯一入口无法自恢复 — 每次先核验实际解释器；用 uv/受控 bootstrap 获取精确 Python，或在 README 明示硬前置与一键修复。
+- [严重度 P1] `scripts/install-env.ps1:41-43` — 即使只做确定性 status/exact lookup，也先安装全部 OpenVINO/ModelScope 依赖，首次运行既慢又依赖公网 — 拆分 stdlib 热路径与模型 extras，模型命令再懒安装重依赖。
+- [严重度 P1] `tests/test.ps1:7,42-44` — 套件声称 fake/no OpenVINO，但 `--continue` 绕过 fake client，干净机无模型时会真实下载约 2.4 GB并可能挂住；本机只是因两模型已完整而 exit 0 — 给 downloader 增加隔离的测试模型根/显式 fake contract，并新增“空模型目录时零网络”测试。
+- [严重度 P1] `scripts/server.py:122-138,195-205`, `scripts/engine.py:39-57,101-128` — server 单线程处理 15–25 s 归因时不能 accept status/第二请求；本轮回归测试仍报 `ResourceWarning: subprocess ... is still running` — 将 status/accept 与模型工作分离，并显式回收/等待所有 spawned process；补既有待办 `test_busy_server_status_remains_bounded`。
+
+### 2. ZIP 审计
+
+首次实际打包：34 files，54,099 bytes，根目录恰好一个 `SKILL.md`，所有 `run.ps1` 运行时依赖齐全且远低于 5 MB；但 ZIP 带入 `tests/*` 和 `docs/evidence/*`，泄露 `C:\Users\miku\...`/用户名，并带有 v0.1/v0.5 的陈旧输出。
+
+已做显然安全的小修：`tools/package.py:11-15` 改为 runtime-only；`SKILL.md:66`、`README.md:33-35`、`docs/article-yanxishe.md:77-79` 修正“status 首次会下载模型”的陈旧描述。重新打包结果：**13 files，28,299 bytes，SHA-256 `119D48AF925FCB00CF6BD156E942B4F6FDEEE92E1E714AEFD4C2E2BA344CB273`**；一个根 `SKILL.md`，运行时必需文件零缺失，用户名/绝对用户路径扫描零命中，全部 Python 脚本可编译。解压后通过唯一入口执行 `status --json`：exit 0，空隔离 DB、FTS5 正常。
+
+“自足”只在**运行文件完整**的意义成立：ZIP 不内含 Python、wheel 或模型；干净机首次安装需要 PyPI + ModelScope，离线机器不能 bootstrap。
+
+- [严重度 P2] `tools/package.py:10` — manifest 预留 `LICENSE`，仓库实际没有该文件，最终 ZIP 也无许可证 — 提交前补真实许可证并让打包器把缺失 LICENSE 当失败，而不是静默跳过。
+
+### 3. `SKILL.md` 触发与 Host 可用性
+
+优点：frontmatter description 实测 693 字符，双语覆盖查坑/记坑/commit/digest、error/exception/traceback，command 入口统一，exact/family/semantic 与置信档解释清楚。
+
+- [严重度 P1] `SKILL.md:4` — `报错/exception/traceback/stderr/本地/离线/offline/AIPC` 被写成独立 trigger，再加 “Prefer ... whenever the error may have occurred”，会与一般调试、离线模型和日志分析 skill 大面积抢触发；英语又缺 `remember/save this fix`、`known issue/past fix` 等真正记忆意图 — 改成明确合取：必须同时有 error signal + history/save/digest intent，并列出非触发场景“只想当场修当前错误”。
+- [严重度 P1] `SKILL.md:35-42,50-55` — reply code fence 含 `//` 注释，不是合法 JSON；只描述 lookup，未给 propose/commit/status/server/digest schema；失败码还漏 `request_unreadable`、argparse/entry/download/digest — 给每个 intent 一份合法最小 JSON 示例和完整 exit/error 表。
+- [严重度 P2] `SKILL.md:26` — `server status|start|stop` 对 Agent 可能被理解为一个带管道字符的字面参数 — 拆成三行或写 `server <status|start|stop>` 并给各自返回码。
+- [严重度 P1] `SKILL.md:59-60`, `scripts/client.py:364-373` — 文档说模型只在首次 propose 与显式 `--attribute` 出场，但普通 semantic lookup 会调用本地 embedder；“模型”把 attribution LLM 与 embedding model 混为一谈 — 明确“LLM 不在 lookup 路径，embedder 在 semantic 路径且可 FTS-only 软降级”。
+- [严重度 P2] `SKILL.md:67`, `scripts/client.py:456-464` — 文档说 ISA load failure 会作为 structured `server` error 暴露，但 `server start` 多数只返回泛化 `failed to start`，只有另调 status 才可能见摘要 — start 直接透传脱敏错误码/摘要或收窄文档承诺。
+
+### 4. 隐私声明反证（按要求，任一反例均 P0）
+
+正常新请求路径的顺序是正确的：request 先 redact，再 fingerprint/store；`client.out()` 也递归 redact。以下独立边界仍足以推翻绝对口径：
+
+- [严重度 P0] `scripts/install-env.ps1:42`, `scripts/download_model.py:60-65`, `README.md:14` — “Nothing leaves the machine”按字面不成立：首次环境安装访问 PyPI，模型下载访问 ModelScope；未发现 error/history 被上传，但至少网络请求、IP/客户端元数据会离机 — 改为“error text/history never leaves; first-time dependencies/models are fetched from PyPI/ModelScope”，并在首次运行前结构化报告网络/磁盘需求。
+- [严重度 P0] `scripts/client.py:28,449-451` — `PITFALL_DB` 与 `digest --out` 接受任意路径；`\\server\share\pitfalls.db`/`pitfalls.md` 会通过 SMB 离机，所以“database/index/retrieval stay on this machine”不是强制不变量 — DB 固定到本地根并拒绝 UNC/remote drive；若保留显式导出，隐私声明必须列出该用户授权例外。
+- [严重度 P0] `scripts/client.py:202-220` — 旧库 migration 只清 `pitfalls.norm_tail` 和 `runtime`；动态反例显示 synthetic secret 在 `pitfalls.attribution`、`occurrences.cwd/raw_head`、`resolutions.root_cause/fix_command/verify_method` 六处迁移后全部仍存在 — 新增版本化全表 scrub migration（含 attribution JSON）并以旧 v0.3/v0.5 fixture 断言所有字符串列与 FTS 均无明文。
+- [严重度 P0] `scripts/server.py:33-38,107-109,162-163` — 完整 traceback 原样落 `~/.pitfall-memory/server.log`；将 `token=SUPERSECRET123456` 传给 logger 后文件仍含 sentinel，直接反证“everything stored is redacted” — 日志写入前统一 redact，或把隐私口径明确排除受保护诊断日志并提供 opt-in/轮转/清除策略。
+- [严重度 P0] `scripts/download_model.py:63-72,87-103` — `run.ps1 --continue` 直接回传 downloader 的 final/partial 路径和异常文本，绕过 `client.deep_redact`；桩反例得到 rc=3 且 username path/secret 两项均为 true — downloader 与 install-env 的所有 Host 输出改走同一 recursive redaction + JSON envelope。
+
+### 5. 文档 20 分项与 demo 10 分项
+
+- README **已有**简洁 ASCII architecture，不是完全缺图；但 article 没有可发布的架构/隐私边界图，也没画出 PyPI/ModelScope 只在 bootstrap 出网、Host 收到脱敏卡的边界。
+- Benchmark 有 26 条明细、生成脚本和语料来源，基础 provenance 尚可；仍缺 CPU 具体型号、RAM/OS/电源模式、精确命令、HEAD、原始日志 hash、多轮方差，以及“25/26 人工正确”的 rubric/复核者。`4B→8B 延迟约翻倍`没有 control run，只能标假设。
+- Qoder 有文字证据，但 README 仍是 `git clone <this repo>`；没有真实仓库/Skill URL、从 ZIP 安装步骤、ExecutionPolicy 处理、Python 3.13/网络/磁盘前置。WorkBuddy 与 TRAE Work 完全没有安装/触发 smoke evidence。
+- README/article 没有独立 Limitations：Windows x64/6 GB、Python 3.13、首次联网、约 5 GB RSS/CPU 延迟、FTS-only 降级、redaction 不是任意 secret DLP、DB 备份/保留、无跨机同步、显式导出例外都应集中说明。
+- `docs/article-yanxishe.md:4,19,40,67,81` 仍标“草稿/截图待补/链接待填”；没有公开 demo video，演示 10 分当前基本无可验收交付。
+
+- [严重度 P1] `README.md:27-41`, `docs/article-yanxishe.md:60-82` — 陌生评委无法从真实链接完成 Qoder 安装，WorkBuddy/TRAE 未覆盖，截图/视频/仓库/Skill 链接仍 TODO — 提交前补三宿主最小 smoke 表、真实 URL、7 张最终截图和公开 60–90 s demo。
+- [严重度 P1] `docs/bench-2026-08-25.md:1-23`, `docs/article-yanxishe.md:56-58` — 关键性能/正确率数字缺完整可复现实验元数据与人工评分准则 — 固化 benchmark command、硬件/软件/HEAD、raw log SHA-256、重复次数/方差和逐条人工判定表。
+- [严重度 P2] `README.md:43-57`, `docs/article-yanxishe.md:42-50` — 架构图没有 bootstrap/network/privacy/export 边界，容易与“nothing leaves”冲突 — 增加一张带信任边界和数据流标签的 Mermaid/静态图。
+- [严重度 P1] `README.md:59-71`, `docs/article-yanxishe.md:83-85` — 没有集中 limitations/operational safety 章节 — 增加上述限制、恢复/备份、日志与显式导出例外。
+
+### 6. 完整测试（指定命令）
+
+命令：`powershell -ExecutionPolicy Bypass -File tests/test.ps1`
+
+原样关键输出：
+
+```text
+Ran 12 tests in 2.206s
+OK
+Ran 5 tests in 1.864s
+OK
+Ran 16 tests in 10.731s
+OK
+Ran 5 tests in 4.151s
+OK
+C:\Program Files\Python313\Lib\subprocess.py:1140: ResourceWarning: subprocess 62496 is still running
+Ran 16 tests in 43.621s
+OK
+[continue] exit=0
+ALL PASS
+```
+
+总计 54 个 Python 测试 + official-entry E2E 通过，进程 exit 0；`ResourceWarning` 不能算失败，但证明生命周期仍有未回收句柄。此次 safe fixes 只改文档与 package manifest，不改运行时代码/测试。
+
+VERDICT: DO-NOT-SHIP
+
+### [CC] #3 处置回执 → v0.7.0（2026-08-26 深夜）
+
+结论：**5 P0 全部采纳，P1 采纳 8 / 记入待办 3，P2 采纳 3。** 六套 + review3 12 项 + E2E 全绿（E2E 新增离线 `--continue` 零联网步、bad_arguments、digest 目录）。zip 重打 `dist/local-pitfall-memory-0.7.0.zip`（14 文件 / 34 KB，含 LICENSE，无 tests/docs，无用户路径）。
+
+**P0（隐私口径）**
+- "Nothing leaves" 字面不成立 → README/SKILL.md 改为精确口径："error text/history/index/retrieval never leave；bootstrap（PyPI wheels、ModelScope 模型）是唯一联网；`digest --out <local file>` 是唯一显式导出"。SKILL.md 新增 *Privacy contract* 节，README 新增信任边界图 + *Limitations* 节。
+- UNC / 网络盘 → `client.assert_local_path()`：`PITFALL_DB` 与 `--out` 拒绝 `\` 前缀与 `GetDriveTypeW==4`（映射网络盘），结构化 `path_not_local`；`--out` 是目录/不可写 → `output_unwritable`。测试 `test_unc_db_path_is_rejected_structured` / `test_digest_out_rejects_unc_and_directories`。
+- 旧库迁移只刷两列 → 新增 `full_scrub_migrated` 版本化迁移：`pitfalls(error_class,package,norm_tail,attribution)`、`occurrences(cwd,raw_head)`、`resolutions(root_cause,fix_command,verify_method)` 全部 redact，FTS 重建。测试用 pre-0.7 形状的库注入 sentinel，六列 + FTS 断言无明文。
+- server.log 原样 traceback → `server.log()` 写入前 `redact()`，1 MB 轮转 `.log.1`；`PITFALL_SERVER_LOG` 可重定向（测试用）。测试 `test_server_log_is_redacted`。
+- downloader 输出绕过脱敏 → `download_model.py` 重写为 `run()` 返回 `(rc, report)`，stdout **恰好一行** JSON，递归 redact；`PITFALL_OFFLINE=1` 不 import modelscope、不联网，缺模型报 `pending`/exit 3；`PITFALL_MODELS_DIR` 隔离模型根（client/server/downloader 三处同源）。测试 `test_downloader_offline_is_zero_network_and_json`。
+
+**P1**
+- run.ps1 JSON 信封：`Fail()` 统一输出 `{"ok":false,"error":..,"message":..}`（message 内做 home/用户名替换），覆盖 `platform_unsupported` / `platform_probe_failed` / `env_install_failed`；install-env 进度改走 Write-Host（stdout 只剩 JSON），失败原因作最后一行由 run.ps1 包进信封。
+- 6 GB 门 fail-open → fail-closed：两种探测都失败报 `platform_probe_failed`，`PITFALL_SKIP_GATE=1` 显式绕过。
+- marker 快路径先于版本核验 → 每次先 `Actual-Version`，不符则删掉错误 venv 重建；无 py 启动器且无 python 时给出明确安装指引；失败不再残留错误 venv。
+- client 顶层：argparse 错误 → `bad_arguments` exit 1（不再 usage+exit 2）；`OSError` → `io_error`；任意异常 → `internal_error`（只带类名+短消息），Host 永远看不到 traceback。
+- test.ps1 `--continue` 真下载风险 → 先在空隔离模型目录 + `PITFALL_OFFLINE=1` 下跑一次（断言 exit 3 + pending），再跑真目录。
+- SKILL.md：description 改为合取触发（error signal + history/memory intent）并列出 *Do NOT trigger* 场景；补 remember/how did we fix/known issue 英文意图；reply 示例改为 5 个合法 ```json 块（无 `//`），补 propose/commit/status/digest/server/--continue 返回；失败码表补全（含 exit 3）；`server status|start|stop` 拆三行；LLM 与 embedder 分开陈述。
+- bench 文档补 *Provenance*：CPU/RAM/OS/电源方案、软件版本、命令与 HEAD、单次 pass 无方差、人工评分口径、"8B 翻倍"标注为推断。
+- LICENSE（MIT）落地；`package.py` 缺任一顶层必需文件直接 assert 失败。
+
+**记入待办（v0.8，不影响提交）**
+- server 独立 status/accept 线程 + `test_busy_server_status_remains_bounded`；`ResourceWarning: subprocess still running` 的句柄回收（engine `_child` 已保留句柄，测试进程退出前显式 `shutdown()` 即可消音，待做）。
+- 依赖拆分（stdlib 热路径 vs 模型 extras 懒装）：首次安装体验问题，工程量不小，本期不做；README 已写明首次联网与耗时。
+- WorkBuddy / TRAE Work 安装-触发 smoke：需要真机与她在场，排在 8/28 录屏同日。文章截图/视频/链接 TODO 同上。
+
+VERDICT（CC 自评）：SHIP-WITH-FIXES → 本回执后为 SHIP，待 8/28 真机证据。

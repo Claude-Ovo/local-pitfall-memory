@@ -8,15 +8,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 LIMIT = 5 * 1024 * 1024
 INCLUDE_TOP = ["SKILL.md", "info.json", "meta.json", "requirements.txt", "README.md", "LICENSE"]
-INCLUDE_DIRS = ["scripts", "tests", "docs/evidence"]
+# The Skills Center artifact is runtime-only. Tests and historical integration
+# evidence stay in the repository; shipping them added stale output and local
+# fixture paths without being needed by scripts/run.ps1.
+INCLUDE_DIRS = ["scripts"]
 EXCLUDE_PARTS = {".git", "__pycache__", ".pytest_cache", "collab", "corpus/tmp"}
 EXCLUDE_SUFFIX = {".pyc", ".log", ".db", ".err"}
 
 def files():
     for name in INCLUDE_TOP:
         p = ROOT / name
-        if p.exists():
-            yield p
+        assert p.exists(), f"required top-level file missing: {name}"     # a missing LICENSE is a packaging failure, not a skip
+        yield p
     for d in INCLUDE_DIRS:
         base = ROOT / d
         if not base.exists():
