@@ -1,7 +1,7 @@
 # 给 Qoder 装一块本地海马体：同一个报错，为什么每次都从头猜？
 
 > 魔搭研习社 · Intel AI PC 专题 · 作品：`local-pitfall-memory`（本地踩坑记忆库）
-> 草稿 v0.1（2026-08-25），基准数字与截图待 8/28 冻结后填入。**定位铁律：全文不出现"教学/教程"；不卖智商，卖记性；隐私口径只承诺"历史库、索引、检索不出机"。**
+> 草稿 v0.2（2026-08-27，代码已冻结 v0.7.0；截图在 `docs/screenshots/`，取自 8/27 真终端录屏；发布前只剩填链接）。**定位铁律：全文不出现"教学/教程"；不卖智商，卖记性；隐私口径只承诺"历史库、索引、检索不出机"。**
 
 ## 0. 一句话
 
@@ -16,7 +16,9 @@
 
 **这个 Skill 做的事只有一件：让 Qoder 记住这台机器上验证过的修复，下次同一个坑 0.4 秒命中。**
 
-（截图 1：Qoder 里粘一段异项目的报错，只说"这错见过吗"，它自己调 Skill、返回 exact/可引用 + 修复命令 + "要不要我执行"）
+![Qoder 自己跑命令、调 Skill，返回 exact/可引用 + 修复卡 + 询问是否执行](screenshots/03-exact-hit.png)
+
+（截图 1 = `docs/screenshots/03-exact-hit.png`；触发瞬间见 `02-skill-activated.png`）
 
 ## 2. 它怎么工作
 
@@ -37,7 +39,7 @@ lookup(报错) → exact   指纹全同                       → 可引用（�
 
 修复建议先 `propose`（未验证），验证命令退出 0 后 `commit`，才进高置信档。**幻觉进不了"可引用"**——这是和"集体记忆平台"最根本的区别：我们不存"有人说过的修法"，只存"在这台机器上跑通过的修法"。
 
-（截图 2：propose 后 lookup 显示 需谨慎；commit 后同一查询变 可引用）
+propose 之后同一查询返回 `"confidence": "需谨慎"`（`resolution.verified: false`），`commit --verify-exit-code 0` 之后变成 `"可引用"`——这是 `tests/test.ps1` E2E 的 lookup1/commit/lookup2 三步，每次跑套件都会重放一遍。
 
 ### 2.3 本地模型在哪、不在哪
 
@@ -64,11 +66,15 @@ lookup(报错) → exact   指纹全同                       → 可引用（�
 3. 显式触发：`/local-pitfall-memory status`
 4. 会话日志：`~/.qoder/logs/sessions/.../*.jsonl` 里 `tool_name: "Skill"` + `run.ps1` 调用
 
-（截图 3–6 待 8/28 真终端重录）
+![报错](screenshots/01-error.png)
+
+![照修复卡改一行，一次过](screenshots/04-fix-verified.png)
+
+![digest 一键汇编踩坑表](screenshots/05-digest.png)
 
 ## 5. 一个反例：它不乱认亲
 
-同一个 `TypeError` 换了引号里的字段名 → family/需谨慎，不冒充 exact；换成 `ERR_MODULE_NOT_FOUND` → 只给"仅联想"。（截图 7）
+真库实测（8/27）：同样的 `SyntaxError: Cannot use import statement outside a module`，但换成另一个项目、`import` 的是 `express` 而不是 `fs/promises`——指纹里的 package 变了，它不冒充 exact，也不给 family，回的是 **semantic / 仅联想**（`channels: ["fts5"]`，同一张修复卡附上，但置信降到最低档）。再换成 `ERR_MODULE_NOT_FOUND: Cannot find package 'express'`——错误类完全不同，FTS5 和向量两路都把"package.json 缺 type:module"那条排到前两名（`fused_score 0.0325, fts_rank 1, vec_rank 2, mode: hybrid`），依然只标"仅联想"。分级不是装饰：它决定 Agent 能不能不验证直接用。
 
 ## 6. 复现
 
@@ -79,7 +85,7 @@ git clone <repo> .qoder/skills/local-pitfall-memory
 .qoder\skills\local-pitfall-memory\tests\test.ps1                      # unit 12 / server 5 / review 16 / retrieval 5 / E2E，全程不碰 OpenVINO
 ```
 
-Skill 链接：（发布后填）· 仓库：（填）· 演示视频：（填）
+Skill 链接：（发布后填）· 仓库：https://github.com/Claude-Ovo/local-pitfall-memory · 演示视频：（发布后填）
 
 ## 7. Hybrid AI 的一点思考
 
