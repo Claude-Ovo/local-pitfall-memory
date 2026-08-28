@@ -17,7 +17,7 @@
 归因用 Qwen3-4B INT4 跑在 OpenVINO 上，纯 CPU，不在查询路径上，不拖慢。
 
 魔搭 × Intel Production AI Skills 大赛作品。
-文章👉（研习社链接）  Skill👉（Skills 中心链接）
+文章👉 https://www.modelscope.cn/learn/436076  Skill👉 https://www.modelscope.cn/skills/CecilyOvo/local-pitfall-memory
 
 #英特尔 #openvino #魔搭 #agentic #skills
 
