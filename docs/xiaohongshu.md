@@ -3,7 +3,7 @@
 标题候选（选一个）：
 1. AI 不笨，它只是失忆：这个报错你上周明明修过
 2. 同一个报错，AI 为什么每次都从头猜？我给 Qoder 装了块本地海马体
-3. 同一个 Bug：从重新排查 17 分钟，到本地命中 0.4 秒   ← 有实测数字，最强
+3. 同一个报错，第二次：本地命中 0.4 秒   ← 0.4s 是真机实测，选这个（17 分钟那个数字没有可复现记录，不用）
 
 正文（≤ 300 字）：
 
@@ -21,4 +21,4 @@
 
 #英特尔 #openvino #魔搭 #agentic #skills
 
-配图：①Qoder 自动触发的那张截图 ②三级命中示意图 ③"0.4s 命中"的终端计时截图
+配图（都在 docs/）：封面 `xiaohongshu-cover.png`（3:4）；①`screenshots/03-exact-hit.png` Qoder 自动触发 + 可引用；②`screenshots/02-skill-activated.png`；③`screenshots/05-digest.png`；视频用 `Videos\魔搭\LPM-Promo-v1.mp4`（37.9s，小红书直接传视频优先，图文备用）
