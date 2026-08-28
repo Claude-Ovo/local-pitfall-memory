@@ -1,1 +1,0 @@
-{"error_text": "node:internal/modules/cjs/loader:1958\n    throw err;\n    ^\nError [ERR_REQUIRE_ESM]: require() of ES Module D:\\work\\sensei-clone\\packages\\cli\\dist\\main.js from D:\\work\\sensei-clone\\bootstrap.js not supported.\n    at Object.<anonymous> (D:\\work\\sensei-clone\\bootstrap.js:11:22)", "context": {"cwd": "D:/work/sensei-clone", "runtime": "node"}}
