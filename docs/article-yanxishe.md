@@ -85,7 +85,7 @@ git clone <repo> .qoder/skills/local-pitfall-memory
 .qoder\skills\local-pitfall-memory\tests\test.ps1                      # unit 12 / server 5 / review 16 / retrieval 5 / E2E，全程不碰 OpenVINO
 ```
 
-Skill 链接：https://www.modelscope.cn/skills/CecilyOvo/local-pitfall-memory · 仓库：https://github.com/Claude-Ovo/local-pitfall-memory · 演示视频：（发布后填）
+Skill 链接：https://www.modelscope.cn/skills/CecilyOvo/local-pitfall-memory · 仓库：https://github.com/Claude-Ovo/local-pitfall-memory · 演示视频：小红书 @winky_ovo（同步发布）· 研习社正文：https://www.modelscope.cn/learn/436076
 
 ## 7. Hybrid AI 的一点思考
 
